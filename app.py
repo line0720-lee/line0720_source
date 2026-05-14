@@ -79,7 +79,7 @@ def settings():
             "phone": request.form.get("phone", ""),
             "fax": request.form.get("fax", ""),
             "manager": request.form.get("manager", ""),
-            "pdf_save_path": request.form.get("pdf_save_path", ""),
+            "bank_account": request.form.get("bank_account", ""),
         }
         save_settings(data)
         flash("설정이 저장되었습니다.", "success")
@@ -159,6 +159,9 @@ def new_quote():
     vendors = get_all_vendors()
     vendor_id = request.args.get("vendor_id", type=int)
 
+    common_vendor = next((v for v in vendors if v["name"] == "공통"), None)
+    common_items = get_all_items(vendor_id=common_vendor["id"]) if common_vendor else []
+
     if vendor_id:
         active_vendor = get_vendor(vendor_id)
         vendor_items = get_all_items(vendor_id=vendor_id)
@@ -172,6 +175,7 @@ def new_quote():
                            vendors=vendors,
                            active_vendor=active_vendor,
                            vendor_items=vendor_items,
+                           common_items=common_items,
                            today=today,
                            valid=valid)
 
@@ -222,25 +226,7 @@ def new_quote_submit():
         line_items=line_items,
     )
 
-    pdf_path = get_setting("pdf_save_path", "")
-    if not pdf_path:
-        pdf_path = os.path.join(os.path.expanduser("~"), "Desktop", "견적서")
-
-    q_dict, items_list = get_quotation(qid)
-    company = get_all_settings()
-
-    try:
-        filepath = generate_pdf(
-            save_path=pdf_path,
-            quotation=dict(q_dict),
-            line_items=[dict(it) for it in items_list],
-            company=company,
-        )
-        update_quotation_pdf(qid, filepath)
-        flash(f"견적서가 저장되었습니다. PDF: {filepath}", "success")
-    except Exception as e:
-        flash(f"견적서는 저장되었으나 PDF 생성 중 오류: {e}", "warning")
-
+    flash("견적서가 저장되었습니다.", "success")
     return redirect(url_for("quote_detail", qid=qid))
 
 
@@ -328,6 +314,9 @@ def quote_edit(qid):
     # GET — 편집 폼 렌더링
     active_vendor = get_vendor(q["vendor_id"]) if q["vendor_id"] else None
     vendor_items  = get_all_items(vendor_id=q["vendor_id"]) if q["vendor_id"] else []
+    common_vendor = next((v for v in vendors if v["name"] == "공통"), None)
+    common_items  = get_all_items(vendor_id=common_vendor["id"]) if common_vendor else []
+    common_vendor_id = common_vendor["id"] if common_vendor else None
     return render_template(
         "quote_edit.html",
         q=q,
@@ -335,6 +324,8 @@ def quote_edit(qid):
         vendors=vendors,
         active_vendor=active_vendor,
         vendor_items=vendor_items,
+        common_items=common_items,
+        common_vendor_id=common_vendor_id,
     )
 
 

@@ -6,7 +6,7 @@ from contextlib import contextmanager
 # 로컬: quotes.db / 클라우드(Render): /data/quotes.db
 DB_PATH = os.environ.get("DB_PATH", "quotes.db")
 
-VENDOR_NAMES = ["KCC", "LG", "영림", "예림"]
+VENDOR_NAMES = ["KCC", "LG", "영림", "예림", "공통"]
 
 
 @contextmanager
@@ -127,7 +127,7 @@ def get_setting(key, default=""):
 
 
 def get_all_settings():
-    keys = ["company_name", "address", "phone", "fax", "manager", "pdf_save_path"]
+    keys = ["company_name", "address", "phone", "fax", "manager", "bank_account"]
     with get_db() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
         result = {k: "" for k in keys}

@@ -90,9 +90,7 @@
     <div class="col-12">
       <div class="card border-0 shadow-sm">
         <div class="card-header bg-white border-bottom pt-3 d-flex justify-content-between align-items-center">
-          <h6 class="fw-bold mb-0">
-            <i class="bi bi-table me-2"></i>견적 품목
-          </h6>
+          <h6 class="fw-bold mb-0"><i class="bi bi-table me-2"></i>견적 품목</h6>
           <div class="d-flex gap-2">
             <button type="button" class="btn btn-sm btn-outline-primary"
                     data-bs-toggle="modal" data-bs-target="#pickModal">
@@ -187,6 +185,10 @@
               </tr>
             </thead>
             <tbody id="pickBody">
+              {% if vendor_items %}
+              <tr class="table-secondary">
+                <td colspan="5" class="py-1 px-3 small fw-semibold text-muted">{{ active_vendor.name }} 품목</td>
+              </tr>
               {% for item in vendor_items %}
               <tr class="pick-row" data-name="{{ item.name|e }}" data-size="{{ item.size|e }}"
                   data-price="{{ item.unit_price }}" data-remarks="{{ item.remarks|e }}">
@@ -196,13 +198,30 @@
                 <td class="text-end">{{ "{:,}".format(item.unit_price) }}원</td>
                 <td class="text-muted small">{{ item.remarks or '' }}</td>
               </tr>
-              {% else %}
+              {% endfor %}
+              {% endif %}
+              {% if common_items %}
+              <tr class="table-secondary">
+                <td colspan="5" class="py-1 px-3 small fw-semibold text-muted">공통 품목</td>
+              </tr>
+              {% for item in common_items %}
+              <tr class="pick-row" data-name="{{ item.name|e }}" data-size="{{ item.size|e }}"
+                  data-price="{{ item.unit_price }}" data-remarks="{{ item.remarks|e }}">
+                <td><input type="checkbox" class="form-check-input pick-chk"></td>
+                <td class="fw-semibold">{{ item.name }}</td>
+                <td class="text-muted">{{ item.size or '-' }}</td>
+                <td class="text-end">{{ "{:,}".format(item.unit_price) }}원</td>
+                <td class="text-muted small">{{ item.remarks or '' }}</td>
+              </tr>
+              {% endfor %}
+              {% endif %}
+              {% if not vendor_items and not common_items %}
               <tr>
                 <td colspan="5" class="text-center text-muted py-4">
                   <i class="bi bi-inbox me-2"></i>품목이 없습니다.
                 </td>
               </tr>
-              {% endfor %}
+              {% endif %}
             </tbody>
           </table>
         </div>
@@ -228,7 +247,7 @@
       <div class="modal-body">
         <p class="text-muted small mb-3">변경 시 품목 선택 목록이 해당 샤시 종류로 갱신됩니다.</p>
         <div class="row g-3">
-          {% for v in vendors %}
+          {% for v in vendors if v.name != '공통' %}
           <div class="col-6">
             <button type="button"
                     class="btn w-100 py-3 {% if active_vendor and active_vendor.id == v.id %}btn-primary{% else %}btn-outline-primary{% endif %}"
@@ -247,7 +266,8 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/quote.js') }}"></script>
 <script>
-// 기존 품목을 테이블에 미리 채움
+const COMMON_VENDOR_ID = {{ common_vendor_id or 'null' }};
+
 const EXISTING_ITEMS = [
   {% for item in items %}
   {
@@ -255,7 +275,6 @@ const EXISTING_ITEMS = [
     size: {{ (item.size or '') | tojson }},
     quantity: {{ item.quantity }},
     unit_price: {{ item.unit_price }},
-    amount: {{ item.amount }},
     remarks: {{ (item.remarks or '') | tojson }}
   }{% if not loop.last %},{% endif %}
   {% endfor %}
@@ -267,34 +286,50 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 });
 
+function renderPickRows(vendorName, vendorItems, commonItems) {
+  let html = '';
+  if (vendorItems.length) {
+    html += `<tr class="table-secondary"><td colspan="5" class="py-1 px-3 small fw-semibold text-muted">${escHtml(vendorName)} 품목</td></tr>`;
+    html += vendorItems.map(renderPickRow).join('');
+  }
+  if (commonItems.length) {
+    html += '<tr class="table-secondary"><td colspan="5" class="py-1 px-3 small fw-semibold text-muted">공통 품목</td></tr>';
+    html += commonItems.map(renderPickRow).join('');
+  }
+  if (!html) {
+    html = '<tr><td colspan="5" class="text-center text-muted py-4"><i class="bi bi-inbox me-2"></i>품목이 없습니다.</td></tr>';
+  }
+  return html;
+}
+
+function renderPickRow(item) {
+  return `<tr class="pick-row" data-name="${escHtml(item.name)}" data-size="${escHtml(item.size||'')}"
+      data-price="${item.unit_price}" data-remarks="${escHtml(item.remarks||'')}">
+    <td><input type="checkbox" class="form-check-input pick-chk"></td>
+    <td class="fw-semibold">${escHtml(item.name)}</td>
+    <td class="text-muted">${escHtml(item.size||'-')}</td>
+    <td class="text-end">${item.unit_price.toLocaleString()}원</td>
+    <td class="text-muted small">${escHtml(item.remarks||'')}</td>
+  </tr>`;
+}
+
 function changeVendor(vendorId, vendorName) {
   document.getElementById('vendorIdInput').value = vendorId;
   document.getElementById('vendorBadge').textContent = vendorName;
   document.getElementById('vendorBadge').className =
     'vendor-badge vendor-badge-' + vendorName + ' fs-6 px-3 py-1';
 
-  // 품목 선택 모달 목록 갱신
-  fetch('/items/list?vendor_id=' + vendorId)
-    .then(r => r.json())
-    .then(items => {
-      const tbody = document.getElementById('pickBody');
-      if (items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">'
-          + '<i class="bi bi-inbox me-2"></i>품목이 없습니다.</td></tr>';
-      } else {
-        tbody.innerHTML = items.map(item => `
-          <tr class="pick-row" data-name="${escHtml(item.name)}" data-size="${escHtml(item.size||'')}"
-              data-price="${item.unit_price}" data-remarks="${escHtml(item.remarks||'')}">
-            <td><input type="checkbox" class="form-check-input pick-chk"></td>
-            <td class="fw-semibold">${escHtml(item.name)}</td>
-            <td class="text-muted">${escHtml(item.size||'-')}</td>
-            <td class="text-end">${item.unit_price.toLocaleString()}원</td>
-            <td class="text-muted small">${escHtml(item.remarks||'')}</td>
-          </tr>`).join('');
-      }
-      // 모달 닫기
-      bootstrap.Modal.getInstance(document.getElementById('vendorModal')).hide();
-    });
+  const fetches = [fetch('/items/list?vendor_id=' + vendorId).then(r => r.json())];
+  if (COMMON_VENDOR_ID && COMMON_VENDOR_ID !== vendorId) {
+    fetches.push(fetch('/items/list?vendor_id=' + COMMON_VENDOR_ID).then(r => r.json()));
+  } else {
+    fetches.push(Promise.resolve([]));
+  }
+
+  Promise.all(fetches).then(([vendorItems, commonItems]) => {
+    document.getElementById('pickBody').innerHTML = renderPickRows(vendorName, vendorItems, commonItems);
+    bootstrap.Modal.getInstance(document.getElementById('vendorModal')).hide();
+  });
 }
 
 function escHtml(s) {

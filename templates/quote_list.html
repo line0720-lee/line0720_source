@@ -9,7 +9,7 @@
        class="btn btn-sm {{ 'btn-dark' if not active_vendor else 'btn-outline-dark' }}">
       전체
     </a>
-    {% for v in vendors %}
+    {% for v in vendors if v.name != '공통' %}
     <a href="{{ url_for('quote_list', vendor_id=v.id) }}"
        class="btn btn-sm {{ 'btn-primary' if active_vendor and active_vendor.id == v.id else 'btn-outline-primary' }}">
       {{ v.name }}

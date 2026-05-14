@@ -109,15 +109,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 행 클릭으로 체크박스 토글
-  document.querySelectorAll('#pickBody .pick-row').forEach(row => {
-    row.addEventListener('click', e => {
-      if (e.target.type !== 'checkbox') {
+  // 행 클릭으로 체크박스 토글 (이벤트 위임 — 동적 추가 행에도 동작)
+  const pickBody = document.getElementById('pickBody');
+  if (pickBody) {
+    pickBody.addEventListener('click', e => {
+      const row = e.target.closest('.pick-row');
+      if (row && e.target.type !== 'checkbox') {
         const chk = row.querySelector('.pick-chk');
         chk.checked = !chk.checked;
       }
     });
-  });
+  }
 
   // 폼 제출 전 검증
   const form = document.getElementById('quoteForm');

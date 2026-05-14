@@ -39,23 +39,10 @@
             <input type="text" class="form-control" name="manager"
                    value="{{ cfg.manager }}" placeholder="홍길동">
           </div>
-        </div>
-      </div>
-
-      <div class="card border-0 shadow-sm mb-4">
-        <div class="card-header bg-white border-bottom pt-3">
-          <h6 class="fw-bold mb-0 text-success"><i class="bi bi-folder2-open me-2"></i>PDF 저장 경로</h6>
-        </div>
-        <div class="card-body">
-          <div class="mb-2">
-            <label class="form-label fw-semibold">저장 폴더 경로</label>
-            <input type="text" class="form-control" name="pdf_save_path"
-                   value="{{ cfg.pdf_save_path }}"
-                   placeholder="예: C:\견적서  또는  D:\업무\견적서">
-            <div class="form-text text-muted">
-              <i class="bi bi-info-circle me-1"></i>
-              폴더가 없으면 자동으로 생성됩니다. 비워두면 바탕화면의 <strong>견적서</strong> 폴더에 저장됩니다.
-            </div>
+          <div class="mt-3">
+            <label class="form-label fw-semibold">계좌번호</label>
+            <input type="text" class="form-control" name="bank_account"
+                   value="{{ cfg.bank_account }}" placeholder="예: 국민은행 123-456-789012 홍길동">
           </div>
         </div>
       </div>
