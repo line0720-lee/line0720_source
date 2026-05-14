@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}견적서 {{ q.quote_number }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+  <div class="d-flex align-items-center gap-2">
+    <h4 class="fw-bold mb-0"><i class="bi bi-file-earmark-text me-2 text-primary"></i>견적서 상세</h4>
+    <span class="badge bg-secondary fs-6">{{ q.quote_number }}</span>
+    {% if q.vendor_name %}
+    <span class="vendor-badge vendor-badge-{{ q.vendor_name }}">{{ q.vendor_name }}</span>
+    {% endif %}
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('quote_pdf', qid=q.id) }}" class="btn btn-success">
+      <i class="bi bi-file-earmark-pdf me-1"></i>PDF 다운로드
+    </a>
+    <a href="{{ url_for('quote_list', vendor_id=q.vendor_id) }}" class="btn btn-outline-secondary">
+      <i class="bi bi-arrow-left me-1"></i>목록
+    </a>
+    <form method="POST" action="{{ url_for('quote_delete', qid=q.id) }}"
+          onsubmit="return confirm('이 견적서를 삭제하시겠습니까?')">
+      <button type="submit" class="btn btn-outline-danger">
+        <i class="bi bi-trash me-1"></i>삭제
+      </button>
+    </form>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm quote-print-area">
+  <div class="card-body p-5">
+
+    <!-- 제목 -->
+    <h2 class="text-center fw-bold mb-4" style="letter-spacing:0.4em">견  적  서</h2>
+
+    <!-- 회사 정보 + 견적 정보 -->
+    <div class="row mb-3">
+      <div class="col-7">
+        <div class="fw-bold fs-5">{{ company.company_name or '샤시크루' }}</div>
+        <div class="text-muted small">{{ company.address or '' }}</div>
+        <div class="text-muted small">
+          TEL: {{ company.phone or '' }} / FAX: {{ company.fax or '' }}
+        </div>
+        <div class="text-muted small">담당: {{ company.manager or '' }}</div>
+      </div>
+      <div class="col-5 text-end">
+        <table class="ms-auto">
+          <tr>
+            <td class="text-muted small pe-3">견적번호</td>
+            <td class="small fw-semibold">{{ q.quote_number }}</td>
+          </tr>
+          {% if q.vendor_name %}
+          <tr>
+            <td class="text-muted small pe-3">업체</td>
+            <td><span class="vendor-badge vendor-badge-{{ q.vendor_name }}">{{ q.vendor_name }}</span></td>
+          </tr>
+          {% endif %}
+          <tr>
+            <td class="text-muted small pe-3">작성일</td>
+            <td class="small">{{ q.issue_date or '' }}</td>
+          </tr>
+          <tr>
+            <td class="text-muted small pe-3">유효기간</td>
+            <td class="small">{{ q.valid_until or '' }}</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <hr class="border-dark border-2">
+
+    <!-- 수신처 -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div>
+        <span class="text-muted small">수신:</span>
+        <span class="fw-bold fs-5 ms-2">{{ q.customer_company or '' }}</span>
+      </div>
+      <div class="text-muted small">
+        담당자: {{ q.customer_name or '-' }} &nbsp;/&nbsp;
+        연락처: {{ q.customer_phone or '-' }}
+      </div>
+    </div>
+
+    <!-- 품목 테이블 -->
+    <div class="table-responsive mb-4">
+      <table class="table table-bordered align-middle quote-table">
+        <thead style="background:#2c3e50;color:white;">
+          <tr>
+            <th class="text-center" style="width:40px">No</th>
+            <th>품명</th>
+            <th class="text-center" style="width:130px">사이즈</th>
+            <th class="text-center" style="width:60px">수량</th>
+            <th class="text-end" style="width:110px">단가</th>
+            <th class="text-end" style="width:120px">금액</th>
+            <th style="width:130px">비고</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+          <tr>
+            <td class="text-center text-muted small">{{ loop.index }}</td>
+            <td class="fw-semibold">{{ item.name }}</td>
+            <td class="text-center text-muted small">{{ item.size or '' }}</td>
+            <td class="text-center">{{ item.quantity }}</td>
+            <td class="text-end">{{ "{:,}".format(item.unit_price) }}</td>
+            <td class="text-end fw-semibold">{{ "{:,}".format(item.amount) }}</td>
+            <td class="text-muted small">{{ item.remarks or '' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 합계 -->
+    <div class="row justify-content-end mb-4">
+      <div class="col-lg-4">
+        <table class="table table-sm mb-0">
+          <tr>
+            <td class="text-muted">공급가액</td>
+            <td class="text-end fw-semibold">{{ "{:,}".format(q.supply_total or 0) }} 원</td>
+          </tr>
+          <tr>
+            <td class="text-muted">부가세 (10%)</td>
+            <td class="text-end fw-semibold">{{ "{:,}".format(q.vat or 0) }} 원</td>
+          </tr>
+          <tr class="table-primary">
+            <td class="fw-bold">합 계</td>
+            <td class="text-end fw-bold fs-5">{{ "{:,}".format(q.grand_total or 0) }} 원</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- 특기사항 -->
+    {% if q.notes %}
+    <div class="border rounded p-3 bg-light">
+      <div class="fw-semibold small text-muted mb-1">특기사항</div>
+      <div style="white-space:pre-line">{{ q.notes }}</div>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

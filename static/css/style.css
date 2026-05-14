@@ -1,0 +1,126 @@
+body {
+  background-color: #f4f6f9;
+  font-family: 'Malgun Gothic', '맑은 고딕', sans-serif;
+}
+
+.navbar-brand {
+  font-size: 1.1rem;
+  letter-spacing: 0.02em;
+}
+
+/* ── 업체 배지 ─────────────────────────────────────────────────────────── */
+.vendor-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.vendor-badge-KCC  { background: #E8F4FD; color: #0d6efd; border: 1px solid #b6d4fe; }
+.vendor-badge-LG   { background: #FFF3CD; color: #b45309; border: 1px solid #ffc107; }
+.vendor-badge-영림  { background: #D1FAE5; color: #065f46; border: 1px solid #6ee7b7; }
+.vendor-badge-예림  { background: #FCE7F3; color: #9d174d; border: 1px solid #f9a8d4; }
+
+/* 업체 선택 버튼 색 */
+.btn-outline-primary.vendor-btn-KCC.btn-primary,
+a.vendor-btn-KCC.btn-primary { background: #0d6efd; border-color: #0d6efd; }
+
+/* ── 업체 선택 카드 (견적서 작성 Step1) ───────────────────────────────── */
+.vendor-select-card .card {
+  transition: transform 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+}
+.vendor-select-card .card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important;
+  border-color: #0d6efd !important;
+}
+
+.vendor-icon-lg {
+  display: inline-block;
+  padding: 8px 24px;
+  border-radius: 12px;
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
+.vendor-icon-lg.vendor-badge-KCC  { background: #E8F4FD; color: #0d6efd; }
+.vendor-icon-lg.vendor-badge-LG   { background: #FFF3CD; color: #b45309; }
+.vendor-icon-lg.vendor-badge-영림  { background: #D1FAE5; color: #065f46; }
+.vendor-icon-lg.vendor-badge-예림  { background: #FCE7F3; color: #9d174d; }
+
+/* ── 대시보드 업체 카드 ─────────────────────────────────────────────────── */
+.vendor-card {
+  transition: box-shadow 0.15s;
+}
+.vendor-card:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1) !important;
+}
+
+/* ── 통계 아이콘 ────────────────────────────────────────────────────────── */
+.stat-icon {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ── 카드 공통 ──────────────────────────────────────────────────────────── */
+.card {
+  border-radius: 0.75rem;
+}
+.card-header {
+  border-radius: 0.75rem 0.75rem 0 0 !important;
+}
+
+/* ── 테이블 행 클릭 ─────────────────────────────────────────────────────── */
+.cursor-pointer { cursor: pointer; }
+
+/* ── 견적서 작성 — 품목 행 입력 ────────────────────────────────────────── */
+#lineBody input[type="text"],
+#lineBody input[type="number"] {
+  border: 1px solid #dee2e6;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  width: 100%;
+  background: white;
+}
+#lineBody input[type="number"] { text-align: right; }
+#lineBody input:focus {
+  outline: none;
+  border-color: #0d6efd;
+  box-shadow: 0 0 0 2px rgba(13,110,253,0.15);
+}
+
+/* ── 합계 강조 ──────────────────────────────────────────────────────────── */
+#grandTotal { color: #0d6efd; }
+
+/* ── 품목 선택 모달 ─────────────────────────────────────────────────────── */
+.pick-row:hover { background-color: #f0f4ff; cursor: pointer; }
+
+/* ── 견적서 인쇄 영역 ───────────────────────────────────────────────────── */
+.quote-print-area { max-width: 900px; margin: 0 auto; }
+.quote-table th {
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding: 0.6rem 0.75rem;
+}
+.quote-table td {
+  font-size: 0.9rem;
+  padding: 0.5rem 0.75rem;
+}
+
+/* ── 공통 ───────────────────────────────────────────────────────────────── */
+.alert  { border-radius: 0.5rem; }
+.btn    { border-radius: 0.5rem; }
+.badge  { font-weight: 600; }
+
+@media (max-width: 768px) {
+  .container-fluid { padding-left: 1rem; padding-right: 1rem; }
+}

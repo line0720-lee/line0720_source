@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: chassis-quote
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DB_PATH
+        value: /data/quotes.db
+    disk:
+      name: db-storage
+      mountPath: /data
+      sizeGB: 1

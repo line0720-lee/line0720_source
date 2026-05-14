@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python \"C:\\\\Claude\\(바이브코딩\\)\\\\Study\\\\hello_world.py\")",
+      "Bash(pip install *)",
+      "Bash(python -c \"import database; import pdf_generator; import app; print\\('모든 모듈 로드 성공'\\)\")",
+      "Bash(python -c \"import database; import pdf_generator; import app; print\\('OK'\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5000/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5000/items)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5000/new-quote)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5000/quotes)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5000/settings)",
+      "Bash(ls \"C:\\\\Users\\\\USER\\\\AppData\\\\Roaming\\\\Claude\\\\local-agent-mode-sessions\\\\skills-plugin\\\\3b45f44b-fc1b-4d45-9aa0-5175172f7030\\\\93c68f04-b185-4cfd-a72e-5919a9cab554\\\\skills\\\\\" 2>&1)",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\Users\\\\USER\\\\AppData\\\\Roaming\\\\Claude\\\\local-agent-mode-sessions\\\\skills-plugin\\\\3b45f44b-fc1b-4d45-9aa0-5175172f7030\\\\93c68f04-b185-4cfd-a72e-5919a9cab554\\\\skills\\\\chassis-quote\\\\evals\")",
+      "Bash(python -c \"from database import init_db; init_db\\(\\); print\\('DB migration OK'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(pkill -f \"python app.py\")",
+      "Bash(python app.py)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5000/?vendor_id=1)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5000/items?vendor_id=2)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5000/new-quote?vendor_id=1)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}
