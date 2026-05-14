@@ -91,6 +91,7 @@ def init_db():
         _safe_add_column(conn, "items", "vendor_id", "INTEGER REFERENCES vendors(id) ON DELETE CASCADE")
         _safe_add_column(conn, "quotations", "vendor_id", "INTEGER REFERENCES vendors(id)")
         _safe_add_column(conn, "quotations", "vendor_name", "TEXT")
+        _safe_add_column(conn, "quotations", "status", "TEXT DEFAULT '견적'")
 
         # 기본 업체 삽입
         for name in VENDOR_NAMES:
@@ -250,6 +251,35 @@ def create_quotation(vendor_id, vendor_name,
     return qid, qnum
 
 
+def update_quotation(qid, vendor_id, vendor_name,
+                     customer_company, customer_name, customer_phone,
+                     issue_date, valid_until, notes,
+                     supply_total, vat, grand_total, line_items):
+    with get_db() as conn:
+        conn.execute(
+            """UPDATE quotations SET
+               vendor_id=?, vendor_name=?,
+               customer_company=?, customer_name=?, customer_phone=?,
+               issue_date=?, valid_until=?, notes=?,
+               supply_total=?, vat=?, grand_total=?, pdf_path=NULL
+               WHERE id=?""",
+            (vendor_id, vendor_name,
+             customer_company, customer_name, customer_phone,
+             issue_date, valid_until, notes,
+             supply_total, vat, grand_total, qid)
+        )
+        conn.execute("DELETE FROM quotation_items WHERE quotation_id=?", (qid,))
+        for item in line_items:
+            conn.execute(
+                """INSERT INTO quotation_items
+                   (quotation_id, name, size, quantity, unit_price, amount, remarks)
+                   VALUES(?,?,?,?,?,?,?)""",
+                (qid, item["name"], item.get("size", ""),
+                 int(item["quantity"]), int(item["unit_price"]),
+                 int(item["amount"]), item.get("remarks", ""))
+            )
+
+
 def update_quotation_pdf(qid, pdf_path):
     with get_db() as conn:
         conn.execute("UPDATE quotations SET pdf_path=? WHERE id=?", (pdf_path, qid))
@@ -296,6 +326,11 @@ def get_quotation_stats():
             (this_month + "%", this_month + "%")
         ).fetchall()
         return rows
+
+
+def update_quotation_status(qid, status):
+    with get_db() as conn:
+        conn.execute("UPDATE quotations SET status=? WHERE id=?", (status, qid))
 
 
 def delete_quotation(qid):

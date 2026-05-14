@@ -11,8 +11,9 @@ from database import (
     get_all_settings, save_settings, get_setting,
     get_all_items, get_item, create_item, update_item, delete_item,
     get_items_count_by_vendor,
-    create_quotation, update_quotation_pdf,
+    create_quotation, update_quotation, update_quotation_pdf,
     get_quotation, get_all_quotations, get_quotation_stats, delete_quotation,
+    update_quotation_status,
 )
 from pdf_generator import generate_pdf, generate_pdf_bytes
 
@@ -267,6 +268,76 @@ def quote_detail(qid):
     return render_template("quote_detail.html", q=q, items=items, company=company)
 
 
+@app.route("/quotes/<int:qid>/edit", methods=["GET", "POST"])
+def quote_edit(qid):
+    q, items = get_quotation(qid)
+    if not q:
+        flash("견적서를 찾을 수 없습니다.", "danger")
+        return redirect(url_for("quote_list"))
+
+    vendors = get_all_vendors()
+
+    if request.method == "POST":
+        f = request.form
+        vendor_id = f.get("vendor_id", type=int)
+        vendor = get_vendor(vendor_id) if vendor_id else None
+        vendor_name = vendor["name"] if vendor else (q["vendor_name"] or "기타")
+
+        line_items = []
+        names   = request.form.getlist("item_name[]")
+        sizes   = request.form.getlist("item_size[]")
+        qtys    = request.form.getlist("item_qty[]")
+        prices  = request.form.getlist("item_price[]")
+        amounts = request.form.getlist("item_amount[]")
+        remarks = request.form.getlist("item_remarks[]")
+
+        for i in range(len(names)):
+            if not names[i].strip():
+                continue
+            line_items.append({
+                "name":       names[i],
+                "size":       sizes[i] if i < len(sizes) else "",
+                "quantity":   int(qtys[i]) if i < len(qtys) and qtys[i] else 1,
+                "unit_price": int(prices[i]) if i < len(prices) and prices[i] else 0,
+                "amount":     int(amounts[i]) if i < len(amounts) and amounts[i] else 0,
+                "remarks":    remarks[i] if i < len(remarks) else "",
+            })
+
+        supply_total = sum(it["amount"] for it in line_items)
+        vat          = round(supply_total * 0.1)
+        grand_total  = supply_total + vat
+
+        update_quotation(
+            qid=qid,
+            vendor_id=vendor_id,
+            vendor_name=vendor_name,
+            customer_company=f.get("customer_company", ""),
+            customer_name=f.get("customer_name", ""),
+            customer_phone=f.get("customer_phone", ""),
+            issue_date=f.get("issue_date", ""),
+            valid_until=f.get("valid_until", ""),
+            notes=f.get("notes", ""),
+            supply_total=supply_total,
+            vat=vat,
+            grand_total=grand_total,
+            line_items=line_items,
+        )
+        flash("견적서가 수정되었습니다.", "success")
+        return redirect(url_for("quote_detail", qid=qid))
+
+    # GET — 편집 폼 렌더링
+    active_vendor = get_vendor(q["vendor_id"]) if q["vendor_id"] else None
+    vendor_items  = get_all_items(vendor_id=q["vendor_id"]) if q["vendor_id"] else []
+    return render_template(
+        "quote_edit.html",
+        q=q,
+        items=items,
+        vendors=vendors,
+        active_vendor=active_vendor,
+        vendor_items=vendor_items,
+    )
+
+
 @app.route("/quotes/<int:qid>/pdf")
 def quote_pdf(qid):
     q, items = get_quotation(qid)
@@ -293,6 +364,16 @@ def quote_pdf(qid):
         as_attachment=True,
         download_name=filename,
     )
+
+
+@app.route("/quotes/<int:qid>/status", methods=["POST"])
+def quote_status_update(qid):
+    data = request.get_json()
+    status = data.get("status", "견적")
+    if status not in ("견적", "보류", "계약"):
+        return jsonify({"success": False, "error": "invalid status"}), 400
+    update_quotation_status(qid, status)
+    return jsonify({"success": True})
 
 
 @app.route("/quotes/<int:qid>/delete", methods=["POST"])

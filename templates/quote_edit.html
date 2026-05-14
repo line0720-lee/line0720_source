@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+{% block title %}견적서 수정 {{ q.quote_number }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div class="d-flex align-items-center gap-2">
+    <h4 class="fw-bold mb-0"><i class="bi bi-pencil-square me-2 text-warning"></i>견적서 수정</h4>
+    <span class="badge bg-secondary fs-6">{{ q.quote_number }}</span>
+  </div>
+  <a href="{{ url_for('quote_detail', qid=q.id) }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i>취소
+  </a>
+</div>
+
+<!-- 샤시 종류 선택 -->
+<div class="mb-3 d-flex align-items-center gap-2 flex-wrap">
+  <span class="text-muted small">샤시 종류:</span>
+  {% if active_vendor %}
+  <span class="vendor-badge vendor-badge-{{ active_vendor.name }} fs-6 px-3 py-1" id="vendorBadge">
+    {{ active_vendor.name }}
+  </span>
+  {% endif %}
+  <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#vendorModal">
+    <i class="bi bi-arrow-repeat me-1"></i>종류 변경
+  </button>
+</div>
+
+<form method="POST" action="{{ url_for('quote_edit', qid=q.id) }}" id="quoteForm">
+  <input type="hidden" name="vendor_id" id="vendorIdInput"
+         value="{{ active_vendor.id if active_vendor else '' }}">
+
+  <div class="row g-4">
+    <!-- 고객 정보 -->
+    <div class="col-lg-6">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-white border-bottom pt-3">
+          <h6 class="fw-bold mb-0 text-primary"><i class="bi bi-person me-2"></i>고객 정보</h6>
+        </div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">거래처(설치장소) <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" name="customer_company"
+                   value="{{ q.customer_company or '' }}" placeholder="예: OO건설" required>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">고객명</label>
+              <input type="text" class="form-control" name="customer_name"
+                     value="{{ q.customer_name or '' }}" placeholder="홍길동">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">연락처</label>
+              <input type="text" class="form-control" name="customer_phone"
+                     value="{{ q.customer_phone or '' }}" placeholder="010-0000-0000">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 견적 정보 -->
+    <div class="col-lg-6">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-white border-bottom pt-3">
+          <h6 class="fw-bold mb-0 text-success"><i class="bi bi-calendar me-2"></i>견적 정보</h6>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">견적일</label>
+              <input type="date" class="form-control" name="issue_date"
+                     value="{{ q.issue_date or '' }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">유효기간</label>
+              <input type="date" class="form-control" name="valid_until"
+                     value="{{ q.valid_until or '' }}">
+            </div>
+          </div>
+          <div class="mt-3">
+            <label class="form-label fw-semibold">특기사항</label>
+            <textarea class="form-control" name="notes" rows="3"
+                      placeholder="납기, 결제조건, 기타 안내사항 등">{{ q.notes or '' }}</textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 품목 -->
+    <div class="col-12">
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white border-bottom pt-3 d-flex justify-content-between align-items-center">
+          <h6 class="fw-bold mb-0">
+            <i class="bi bi-table me-2"></i>견적 품목
+          </h6>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-sm btn-outline-primary"
+                    data-bs-toggle="modal" data-bs-target="#pickModal">
+              <i class="bi bi-plus-circle me-1"></i>품목 선택
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addCustomRow()">
+              <i class="bi bi-pencil me-1"></i>직접 입력
+            </button>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table align-middle mb-0" id="lineTable">
+              <thead class="table-light">
+                <tr>
+                  <th class="ps-3" style="width:40px">#</th>
+                  <th>품명</th>
+                  <th style="width:140px">사이즈</th>
+                  <th style="width:80px">수량</th>
+                  <th style="width:120px">단가</th>
+                  <th style="width:130px">금액</th>
+                  <th style="width:140px">비고</th>
+                  <th style="width:50px"></th>
+                </tr>
+              </thead>
+              <tbody id="lineBody">
+                <tr id="emptyHint" style="display:none">
+                  <td colspan="8" class="text-center text-muted py-5">
+                    <i class="bi bi-arrow-up-circle fs-4 d-block mb-2"></i>
+                    위 버튼으로 품목을 추가하세요.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 합계 -->
+        <div class="card-footer bg-white border-top">
+          <div class="row justify-content-end">
+            <div class="col-lg-4">
+              <table class="table table-sm mb-0">
+                <tr>
+                  <td class="text-muted">공급가액</td>
+                  <td class="text-end fw-semibold" id="supplyTotal">0원</td>
+                </tr>
+                <tr>
+                  <td class="text-muted">부가세 (10%)</td>
+                  <td class="text-end fw-semibold" id="vatTotal">0원</td>
+                </tr>
+                <tr class="table-primary">
+                  <td class="fw-bold">합 계</td>
+                  <td class="text-end fw-bold fs-5" id="grandTotal">0원</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 저장 버튼 -->
+    <div class="col-12 d-flex gap-2 justify-content-end">
+      <a href="{{ url_for('quote_detail', qid=q.id) }}"
+         class="btn btn-outline-secondary px-4">취소</a>
+      <button type="submit" class="btn btn-warning px-5 fw-semibold">
+        <i class="bi bi-check-lg me-2"></i>수정 저장
+      </button>
+    </div>
+  </div>
+</form>
+
+<!-- 품목 선택 모달 -->
+<div class="modal fade" id="pickModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header border-0">
+        <h5 class="modal-title fw-bold">품목 선택</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="text" class="form-control mb-3" id="pickSearch" placeholder="품명 검색...">
+        <div class="table-responsive" style="max-height:380px;overflow-y:auto">
+          <table class="table table-hover align-middle">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th style="width:40px"></th>
+                <th>품명</th>
+                <th>사이즈</th>
+                <th class="text-end">단가</th>
+                <th>비고</th>
+              </tr>
+            </thead>
+            <tbody id="pickBody">
+              {% for item in vendor_items %}
+              <tr class="pick-row" data-name="{{ item.name|e }}" data-size="{{ item.size|e }}"
+                  data-price="{{ item.unit_price }}" data-remarks="{{ item.remarks|e }}">
+                <td><input type="checkbox" class="form-check-input pick-chk"></td>
+                <td class="fw-semibold">{{ item.name }}</td>
+                <td class="text-muted">{{ item.size or '-' }}</td>
+                <td class="text-end">{{ "{:,}".format(item.unit_price) }}원</td>
+                <td class="text-muted small">{{ item.remarks or '' }}</td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="5" class="text-center text-muted py-4">
+                  <i class="bi bi-inbox me-2"></i>품목이 없습니다.
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer border-0">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+        <button class="btn btn-primary px-4" onclick="addSelected()">
+          <i class="bi bi-plus-lg me-1"></i>선택 추가
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 샤시 종류 변경 모달 -->
+<div class="modal fade" id="vendorModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header border-0">
+        <h5 class="modal-title fw-bold">샤시 종류 변경</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3">변경 시 품목 선택 목록이 해당 샤시 종류로 갱신됩니다.</p>
+        <div class="row g-3">
+          {% for v in vendors %}
+          <div class="col-6">
+            <button type="button"
+                    class="btn w-100 py-3 {% if active_vendor and active_vendor.id == v.id %}btn-primary{% else %}btn-outline-primary{% endif %}"
+                    onclick="changeVendor({{ v.id }}, '{{ v.name|e }}')">
+              <span class="vendor-badge vendor-badge-{{ v.name }} d-block mb-1">{{ v.name }}</span>
+            </button>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/quote.js') }}"></script>
+<script>
+// 기존 품목을 테이블에 미리 채움
+const EXISTING_ITEMS = [
+  {% for item in items %}
+  {
+    name: {{ item.name | tojson }},
+    size: {{ (item.size or '') | tojson }},
+    quantity: {{ item.quantity }},
+    unit_price: {{ item.unit_price }},
+    amount: {{ item.amount }},
+    remarks: {{ (item.remarks or '') | tojson }}
+  }{% if not loop.last %},{% endif %}
+  {% endfor %}
+];
+
+document.addEventListener('DOMContentLoaded', function () {
+  EXISTING_ITEMS.forEach(function (item) {
+    addRow(item.name, item.size, item.quantity, item.unit_price, item.remarks);
+  });
+});
+
+function changeVendor(vendorId, vendorName) {
+  document.getElementById('vendorIdInput').value = vendorId;
+  document.getElementById('vendorBadge').textContent = vendorName;
+  document.getElementById('vendorBadge').className =
+    'vendor-badge vendor-badge-' + vendorName + ' fs-6 px-3 py-1';
+
+  // 품목 선택 모달 목록 갱신
+  fetch('/items/list?vendor_id=' + vendorId)
+    .then(r => r.json())
+    .then(items => {
+      const tbody = document.getElementById('pickBody');
+      if (items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">'
+          + '<i class="bi bi-inbox me-2"></i>품목이 없습니다.</td></tr>';
+      } else {
+        tbody.innerHTML = items.map(item => `
+          <tr class="pick-row" data-name="${escHtml(item.name)}" data-size="${escHtml(item.size||'')}"
+              data-price="${item.unit_price}" data-remarks="${escHtml(item.remarks||'')}">
+            <td><input type="checkbox" class="form-check-input pick-chk"></td>
+            <td class="fw-semibold">${escHtml(item.name)}</td>
+            <td class="text-muted">${escHtml(item.size||'-')}</td>
+            <td class="text-end">${item.unit_price.toLocaleString()}원</td>
+            <td class="text-muted small">${escHtml(item.remarks||'')}</td>
+          </tr>`).join('');
+      }
+      // 모달 닫기
+      bootstrap.Modal.getInstance(document.getElementById('vendorModal')).hide();
+    });
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+</script>
+{% endblock %}

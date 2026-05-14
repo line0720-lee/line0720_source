@@ -21,7 +21,7 @@ function recalc() {
   document.getElementById('grandTotal').textContent  = fmt(grand)  + '원';
 }
 
-function addRow(name = '', size = '', price = 0, remarks = '') {
+function addRow(name = '', size = '', qty = 1, price = 0, remarks = '') {
   const hint = document.getElementById('emptyHint');
   if (hint) hint.remove();
 
@@ -32,11 +32,11 @@ function addRow(name = '', size = '', price = 0, remarks = '') {
     <td class="ps-3 text-muted small seq">${rowCount}</td>
     <td><input type="text"   class="form-control form-control-sm name-input" name="item_name[]"    value="${escHtml(name)}"    placeholder="품명"></td>
     <td><input type="text"   class="form-control form-control-sm"             name="item_size[]"    value="${escHtml(size)}"    placeholder="사이즈"></td>
-    <td><input type="number" class="form-control form-control-sm qty"          name="item_qty[]"     value="1"   min="1"></td>
+    <td><input type="number" class="form-control form-control-sm qty"          name="item_qty[]"     value="${qty}" min="1"></td>
     <td><input type="number" class="form-control form-control-sm price"        name="item_price[]"   value="${price}" min="0"></td>
     <td>
       <input type="hidden" class="amount" name="item_amount[]" value="0">
-      <span class="amount-display fw-semibold text-end d-block">${fmt(price)}원</span>
+      <span class="amount-display fw-semibold text-end d-block">${fmt(qty * price)}원</span>
     </td>
     <td><input type="text"   class="form-control form-control-sm"             name="item_remarks[]" value="${escHtml(remarks)}" placeholder="비고"></td>
     <td class="text-center">
@@ -88,6 +88,7 @@ function addSelected() {
     addRow(
       row.dataset.name,
       row.dataset.size,
+      1,
       parseInt(row.dataset.price) || 0,
       row.dataset.remarks
     );

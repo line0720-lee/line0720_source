@@ -33,7 +33,7 @@
       {% endif %}
     </span>
     <input type="text" class="form-control form-control-sm w-auto" id="searchInput"
-           placeholder="거래처명 또는 견적번호 검색..." style="min-width:220px">
+           placeholder="거래처(설치장소) 또는 견적번호 검색..." style="min-width:220px">
   </div>
   <div class="card-body p-0">
     <div class="table-responsive">
@@ -41,12 +41,12 @@
         <thead class="table-dark">
           <tr>
             <th class="ps-4">견적번호</th>
-            {% if not active_vendor %}<th>업체</th>{% endif %}
-            <th>거래처명</th>
-            <th>담당자</th>
-            <th>견적일</th>
-            <th class="text-end">공급가액</th>
-            <th class="text-end">합계금액</th>
+            {% if not active_vendor %}<th>샤시종류</th>{% endif %}
+            <th>거래처(설치장소)</th>
+            <th>고객명</th>
+            <th>작성일</th>
+            <th class="text-end">금액</th>
+            <th class="text-center">진행상태</th>
             <th class="text-center pe-4">관리</th>
           </tr>
         </thead>
@@ -68,12 +68,25 @@
             <td class="fw-semibold">{{ q.customer_company or '-' }}</td>
             <td class="text-muted small">{{ q.customer_name or '-' }}</td>
             <td class="text-muted small">{{ q.issue_date or q.created_at[:10] }}</td>
-            <td class="text-end text-muted">{{ "{:,}".format(q.supply_total or 0) }}원</td>
             <td class="text-end fw-semibold text-primary">{{ "{:,}".format(q.grand_total or 0) }}원</td>
+            <td class="text-center">
+              {% set st = q.status or '견적' %}
+              <select class="status-select status-{{ st }}"
+                      onclick="event.stopPropagation()"
+                      onchange="updateStatus({{ q.id }}, this.value, this)">
+                <option value="견적" {% if st == '견적' %}selected{% endif %}>견적</option>
+                <option value="보류" {% if st == '보류' %}selected{% endif %}>보류</option>
+                <option value="계약" {% if st == '계약' %}selected{% endif %}>계약</option>
+              </select>
+            </td>
             <td class="text-center pe-4">
               <a href="{{ url_for('quote_detail', qid=q.id) }}"
                  class="btn btn-sm btn-outline-primary me-1" title="상세보기">
                 <i class="bi bi-eye"></i>
+              </a>
+              <a href="{{ url_for('quote_edit', qid=q.id) }}"
+                 class="btn btn-sm btn-outline-warning me-1" title="수정">
+                <i class="bi bi-pencil"></i>
               </a>
               <a href="{{ url_for('quote_pdf', qid=q.id) }}"
                  class="btn btn-sm btn-outline-success me-1" title="PDF">
@@ -110,5 +123,17 @@ document.getElementById('searchInput').addEventListener('input', function () {
     row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
   });
 });
+
+function updateStatus(qid, status, sel) {
+  fetch(`/quotes/${qid}/status`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({status})
+  }).then(r => r.json()).then(data => {
+    if (data.success) {
+      sel.className = `status-select status-${status}`;
+    }
+  });
+}
 </script>
 {% endblock %}

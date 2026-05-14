@@ -7,17 +7,17 @@
 </div>
 
 {% if not active_vendor %}
-<!-- ── STEP 1: 업체 선택 ── -->
+<!-- ── STEP 1: 샤시 종류 선택 ── -->
 <div class="row justify-content-center">
   <div class="col-lg-7">
     <div class="card border-0 shadow-sm">
       <div class="card-header bg-white border-bottom pt-3">
         <h6 class="fw-bold mb-0 text-primary">
-          <i class="bi bi-buildings me-2"></i>Step 1. 업체 선택
+          <i class="bi bi-buildings me-2"></i>Step 1. 샤시 종류 선택
         </h6>
       </div>
       <div class="card-body py-4">
-        <p class="text-muted mb-4">견적서를 작성할 업체를 선택하세요.</p>
+        <p class="text-muted mb-4">견적서를 작성할 샤시 종류를 선택하세요.</p>
         <div class="row g-3">
           {% for v in vendors %}
           <div class="col-6">
@@ -41,14 +41,14 @@
 </div>
 
 {% else %}
-<!-- ── STEP 2: 견적서 작성 (업체 선택 완료) ── -->
+<!-- ── STEP 2: 견적서 작성 (샤시 종류 선택 완료) ── -->
 <div class="mb-3 d-flex align-items-center gap-2">
-  <span class="text-muted small">업체:</span>
+  <span class="text-muted small">샤시 종류:</span>
   <span class="vendor-badge vendor-badge-{{ active_vendor.name }} fs-6 px-3 py-1">
     {{ active_vendor.name }}
   </span>
   <a href="{{ url_for('new_quote') }}" class="btn btn-sm btn-outline-secondary ms-1">
-    <i class="bi bi-arrow-left me-1"></i>업체 변경
+    <i class="bi bi-arrow-left me-1"></i>종류 변경
   </a>
 </div>
 
@@ -64,13 +64,13 @@
         </div>
         <div class="card-body">
           <div class="mb-3">
-            <label class="form-label fw-semibold">거래처명 <span class="text-danger">*</span></label>
+            <label class="form-label fw-semibold">거래처(설치장소) <span class="text-danger">*</span></label>
             <input type="text" class="form-control" name="customer_company"
                    placeholder="예: OO건설" required>
           </div>
           <div class="row g-3">
             <div class="col-md-6">
-              <label class="form-label fw-semibold">담당자</label>
+              <label class="form-label fw-semibold">고객명</label>
               <input type="text" class="form-control" name="customer_name" placeholder="홍길동">
             </div>
             <div class="col-md-6">

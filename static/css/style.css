@@ -116,6 +116,19 @@ a.vendor-btn-KCC.btn-primary { background: #0d6efd; border-color: #0d6efd; }
   padding: 0.5rem 0.75rem;
 }
 
+/* ── 진행상태 셀렉트 ────────────────────────────────────────────────────── */
+.status-select {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.4rem;
+  min-width: 72px;
+  cursor: pointer;
+}
+.status-select.status-견적 { border-color: #0d6efd; color: #0d6efd; background: #f0f4ff; }
+.status-select.status-보류 { border-color: #ffc107; color: #856404; background: #fffbea; }
+.status-select.status-계약 { border-color: #198754; color: #198754; background: #edfaf3; }
+
 /* ── 공통 ───────────────────────────────────────────────────────────────── */
 .alert  { border-radius: 0.5rem; }
 .btn    { border-radius: 0.5rem; }

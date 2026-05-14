@@ -120,7 +120,7 @@ def _build_story(quotation: dict, line_items: list, company: dict):
     left = [
         [Paragraph(f"<b>{co_name}</b>", _style(11, bold=True))],
         [Paragraph(co_addr, _style(9))],
-        [Paragraph(f"TEL: {co_phone}  /  FAX: {co_fax}", _style(9))],
+        [Paragraph(f"TEL: {co_phone}  /  휴대폰: {co_fax}", _style(9))],
         [Paragraph(f"담당: {co_mgr}", _style(9))],
     ]
     right = [
