@@ -68,6 +68,9 @@ partial class MainForm
         // ── 결과 목록 ────────────────────────────────────────────
         listResults         = new ListView();
 
+        // ── 좌우 분할 컨테이너 (결과 목록 | 미리보기) ────────────
+        splitPreview        = new SplitContainer();
+
         // ── 상태바 ───────────────────────────────────────────────
         statusStrip         = new StatusStrip();
         sslResultCount      = new ToolStripStatusLabel();
@@ -106,6 +109,11 @@ partial class MainForm
         // ─────────────────────────────────────────────────────────
         // SuspendLayout
         // ─────────────────────────────────────────────────────────
+        ((System.ComponentModel.ISupportInitialize)splitPreview).BeginInit();
+        splitPreview.Panel1.SuspendLayout();
+        splitPreview.Panel2.SuspendLayout();
+        splitPreview.SuspendLayout();
+
         menuStrip.SuspendLayout();
         pnlSearch.SuspendLayout();
         tblToolbar.SuspendLayout();
@@ -271,7 +279,7 @@ partial class MainForm
         pnlSearch.Dock = DockStyle.Top; pnlSearch.Height = 74; pnlSearch.Name = "pnlSearch";
 
         // ═════════════════════════════════════════════════════════
-        // 스니펫 패널
+        // 스니펫 패널 (미리보기 — SplitContainer Panel2에 배치)
         // ═════════════════════════════════════════════════════════
         lblSnippetIcon.AutoSize = false; lblSnippetIcon.Location = new Point(4, 3);
         lblSnippetIcon.Size = new Size(20, 18); lblSnippetIcon.Text = "📄";
@@ -280,7 +288,7 @@ partial class MainForm
         lblSnippetPath.AutoSize = false;
         lblSnippetPath.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         lblSnippetPath.Location = new Point(26, 4); lblSnippetPath.Name = "lblSnippetPath";
-        lblSnippetPath.Size = new Size(960, 16);
+        lblSnippetPath.Size = new Size(280, 16);
         lblSnippetPath.Text = "항목을 선택하면 미리보기가 표시됩니다";
         lblSnippetPath.ForeColor = SystemColors.GrayText;
 
@@ -288,7 +296,7 @@ partial class MainForm
         btnSnippetClose.FlatStyle = FlatStyle.Flat;
         btnSnippetClose.FlatAppearance.BorderSize = 0;
         btnSnippetClose.Font = new Font("Segoe UI", 8F);
-        btnSnippetClose.Location = new Point(990, 2);
+        btnSnippetClose.Location = new Point(310, 2);
         btnSnippetClose.Name = "btnSnippetClose"; btnSnippetClose.Size = new Size(22, 20);
         btnSnippetClose.Text = "✕"; btnSnippetClose.TabStop = false;
 
@@ -302,7 +310,8 @@ partial class MainForm
         rtbSnippet.TabStop = false; rtbSnippet.WordWrap = true; rtbSnippet.DetectUrls = false;
 
         pnlSnippet.Controls.AddRange([rtbSnippet, pnlSnippetBar]);
-        pnlSnippet.Dock = DockStyle.Bottom; pnlSnippet.Height = 110; pnlSnippet.Name = "pnlSnippet";
+        pnlSnippet.Dock = DockStyle.Fill;   // Panel2 안에서 Fill
+        pnlSnippet.Name = "pnlSnippet";
 
         // ═════════════════════════════════════════════════════════
         // ListView
@@ -327,6 +336,19 @@ partial class MainForm
         imgListSmall.ColorDepth = ColorDepth.Depth32Bit;
         imgListSmall.ImageSize  = new Size(16, 16);
         imgListSmall.TransparentColor = Color.Transparent;
+
+        // ═════════════════════════════════════════════════════════
+        // SplitContainer — 좌(결과 목록) / 우(미리보기)
+        // Panel1MinSize / Panel2MinSize / SplitterDistance 는
+        // 폼 크기 확정 후 Load 이벤트에서 설정 (EndInit 오류 방지)
+        // ═════════════════════════════════════════════════════════
+        splitPreview.Dock         = DockStyle.Fill;
+        splitPreview.Name         = "splitPreview";
+        splitPreview.Orientation  = Orientation.Vertical;  // 세로선 = 좌/우 분할
+        splitPreview.SplitterWidth = 5;
+
+        splitPreview.Panel1.Controls.Add(listResults);  // 왼쪽: 결과 목록
+        splitPreview.Panel2.Controls.Add(pnlSnippet);   // 오른쪽: 미리보기
 
         // ═════════════════════════════════════════════════════════
         // StatusStrip
@@ -400,13 +422,17 @@ partial class MainForm
         Text                = "SFM — Smart File Manager";
 
         // 도킹 순서 (나중에 추가된 컨트롤이 먼저 도킹됨)
-        Controls.Add(listResults);   // Fill — 먼저 추가, 마지막 처리
-        Controls.Add(pnlSnippet);    // Bottom
+        Controls.Add(splitPreview);  // Fill — 결과목록+미리보기 컨테이너
         Controls.Add(pnlSearch);     // Top
         Controls.Add(menuStrip);     // Top (최상단)
         Controls.Add(statusStrip);   // Bottom (맨 아래)
 
         // ─────────────────────────────────────────────────────────
+        splitPreview.Panel1.ResumeLayout(false);
+        splitPreview.Panel2.ResumeLayout(false);
+        splitPreview.ResumeLayout(false);
+        ((System.ComponentModel.ISupportInitialize)splitPreview).EndInit();
+
         menuStrip.ResumeLayout(false);
         menuStrip.PerformLayout();
         tblToolbar.ResumeLayout(false);
@@ -467,6 +493,8 @@ partial class MainForm
     private Label                lblSnippetPath      = null!;
     private Button               btnSnippetClose     = null!;
     private RichTextBox          rtbSnippet          = null!;
+
+    private SplitContainer       splitPreview        = null!;
 
     private ListView             listResults         = null!;
     private StatusStrip          statusStrip         = null!;

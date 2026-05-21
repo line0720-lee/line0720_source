@@ -107,6 +107,21 @@ public partial class MainForm : Form
 
         _watcher.StartWatching(_settings.IndexRootPaths);
         ActiveControl = txtSearch;
+
+        // SplitterDistance는 폼 크기 확정 후 설정 (EndInit 오류 방지)
+        Load += (_, _) =>
+        {
+            try
+            {
+                splitPreview.Panel1MinSize    = 300;
+                splitPreview.Panel2MinSize    = 200;
+                splitPreview.SplitterDistance = Math.Clamp(
+                    (int)(splitPreview.Width * 0.62),
+                    splitPreview.Panel1MinSize,
+                    splitPreview.Width - splitPreview.Panel2MinSize - splitPreview.SplitterWidth);
+            }
+            catch { /* 방어적 처리 */ }
+        };
     }
 
     // ─────────────────────────────────────────────────────────
@@ -245,14 +260,20 @@ public partial class MainForm : Form
 
         // ── 스니펫 닫기 ──────────────────────────────────────────
         btnSnippetClose.Click += (_, _) =>
-        { pnlSnippet.Visible = false; tsmiViewSnippet.Checked = false; };
+        {
+            splitPreview.Panel2Collapsed = true;
+            tsmiViewSnippet.Checked = false;
+        };
 
         // ── 메뉴 ─────────────────────────────────────────────────
         tsmiFileNewWindow.Click += (_, _) => new MainForm().Show();
         tsmiFileExit.Click      += (_, _) => Close();
 
         tsmiViewDark.Click += (_, _) => { _settings.IsDarkMode = tsmiViewDark.Checked; ApplyTheme(); };
-        tsmiViewSnippet.Click += (_, _) => pnlSnippet.Visible = tsmiViewSnippet.Checked;
+        tsmiViewSnippet.Click += (_, _) =>
+        {
+            splitPreview.Panel2Collapsed = !tsmiViewSnippet.Checked;
+        };
         tsmiViewAutoCol.Click += (_, _) => AutoResizeColumns();
 
         tsmiSearchContent.Click += (_, _) => chkContent.Checked = tsmiSearchContent.Checked;
@@ -318,6 +339,7 @@ public partial class MainForm : Form
         chkTypeDoc.ForeColor = chkTypePdf.ForeColor = chkTypeImage.ForeColor = chkTypeCode.ForeColor = text;
         lblDbInfo.ForeColor = gray;
 
+        splitPreview.BackColor = Color.FromArgb(60, 60, 65);  // 스플리터 구분선 색상
         listResults.BackColor = Color.FromArgb(25, 25, 25); listResults.ForeColor = text;
 
         pnlSnippet.BackColor = Color.FromArgb(35, 35, 35);
@@ -351,6 +373,7 @@ public partial class MainForm : Form
         chkTypeDoc.ForeColor = chkTypePdf.ForeColor = chkTypeImage.ForeColor = chkTypeCode.ForeColor = SystemColors.WindowText;
         lblDbInfo.ForeColor = SystemColors.GrayText;
 
+        splitPreview.BackColor = Color.FromArgb(200, 200, 200);  // 스플리터 구분선 색상
         listResults.BackColor = SystemColors.Window; listResults.ForeColor = SystemColors.WindowText;
 
         pnlSnippet.BackColor = Color.FromArgb(252, 252, 252);
@@ -422,7 +445,7 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     private void OnListSelectionChanged(object? sender, EventArgs e)
     {
-        if (!pnlSnippet.Visible) return;
+        if (splitPreview.Panel2Collapsed) return;
         UpdateSnippetPanel(GetSelectedResult());
     }
 
@@ -509,7 +532,7 @@ public partial class MainForm : Form
                 : $"검색 완료.  {_results.Count:N0} 파일/폴더 발견.  경과 시간: {elapsed:F3} 초";
 
             Text = _results.Count > 0 ? $"SFM — \"{keyword}\" ({_results.Count:N0}개)" : "SFM — Smart File Manager";
-            if (_results.Count > 0 && pnlSnippet.Visible) UpdateSnippetPanel(_results[0]);
+            if (_results.Count > 0 && !splitPreview.Panel2Collapsed) UpdateSnippetPanel(_results[0]);
         }
         catch (Exception ex)
         {
