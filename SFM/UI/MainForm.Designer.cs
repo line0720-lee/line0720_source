@@ -280,14 +280,14 @@ partial class MainForm
         // ═════════════════════════════════════════════════════════
         // 스니펫 패널 (미리보기 — SplitContainer Panel2에 배치)
         // ═════════════════════════════════════════════════════════
-        lblSnippetIcon.AutoSize = false; lblSnippetIcon.Location = new Point(4, 3);
-        lblSnippetIcon.Size = new Size(20, 18); lblSnippetIcon.Text = "📄";
+        lblSnippetIcon.AutoSize = false; lblSnippetIcon.Location = new Point(8, 6);
+        lblSnippetIcon.Size = new Size(22, 20); lblSnippetIcon.Text = "📄";
         lblSnippetIcon.Name = "lblSnippetIcon";
 
         lblSnippetPath.AutoSize = false;
         lblSnippetPath.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        lblSnippetPath.Location = new Point(26, 4); lblSnippetPath.Name = "lblSnippetPath";
-        lblSnippetPath.Size = new Size(280, 16);
+        lblSnippetPath.Location = new Point(40, 8); lblSnippetPath.Name = "lblSnippetPath";
+        lblSnippetPath.Size = new Size(320, 16);
         lblSnippetPath.Text = "항목을 선택하면 미리보기가 표시됩니다";
         lblSnippetPath.ForeColor = SystemColors.GrayText;
 
@@ -295,13 +295,13 @@ partial class MainForm
         btnSnippetClose.FlatStyle = FlatStyle.Flat;
         btnSnippetClose.FlatAppearance.BorderSize = 0;
         btnSnippetClose.Font = new Font("Segoe UI", 8F);
-        btnSnippetClose.Location = new Point(310, 2);
-        btnSnippetClose.Name = "btnSnippetClose"; btnSnippetClose.Size = new Size(22, 20);
+        btnSnippetClose.Location = new Point(360, 5);
+        btnSnippetClose.Name = "btnSnippetClose"; btnSnippetClose.Size = new Size(22, 22);
         btnSnippetClose.Text = "✕"; btnSnippetClose.TabStop = false;
 
         pnlSnippetBar.Controls.AddRange([lblSnippetIcon, lblSnippetPath, btnSnippetClose]);
-        pnlSnippetBar.Dock = DockStyle.Top; pnlSnippetBar.Height = 24;
-        pnlSnippetBar.Name = "pnlSnippetBar"; pnlSnippetBar.Padding = new Padding(2, 0, 2, 0);
+        pnlSnippetBar.Dock = DockStyle.Top; pnlSnippetBar.Height = 32;
+        pnlSnippetBar.Name = "pnlSnippetBar"; pnlSnippetBar.Padding = new Padding(4, 0, 4, 0);
 
         rtbSnippet.Dock = DockStyle.Fill; rtbSnippet.BorderStyle = BorderStyle.None;
         rtbSnippet.Font = new Font("Consolas", 9F); rtbSnippet.Name = "rtbSnippet";

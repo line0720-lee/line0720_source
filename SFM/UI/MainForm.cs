@@ -114,9 +114,9 @@ public partial class MainForm : Form
             try
             {
                 splitPreview.Panel1MinSize    = 300;
-                splitPreview.Panel2MinSize    = 200;
+                splitPreview.Panel2MinSize    = 180;
                 splitPreview.SplitterDistance = Math.Clamp(
-                    (int)(splitPreview.Width * 0.62),
+                    (int)(splitPreview.Width * 0.72),   // 미리보기 ~28% 기본값
                     splitPreview.Panel1MinSize,
                     splitPreview.Width - splitPreview.Panel2MinSize - splitPreview.SplitterWidth);
             }
@@ -532,7 +532,11 @@ public partial class MainForm : Form
                 : $"검색 완료.  {_results.Count:N0} 파일/폴더 발견.  경과 시간: {elapsed:F3} 초";
 
             Text = _results.Count > 0 ? $"SFM — \"{keyword}\" ({_results.Count:N0}개)" : "SFM — Smart File Manager";
-            if (_results.Count > 0 && !splitPreview.Panel2Collapsed) UpdateSnippetPanel(_results[0]);
+            if (_results.Count > 0)
+            {
+                AutoResizeColumns();   // 결과마다 열 너비 자동 조정
+                if (!splitPreview.Panel2Collapsed) UpdateSnippetPanel(_results[0]);
+            }
         }
         catch (Exception ex)
         {
@@ -816,8 +820,14 @@ public partial class MainForm : Form
     private void AutoResizeColumns()
     {
         if (_results.Count == 0) return;
+        // ColumnContent: 보이는 행 기준 측정 (VirtualMode에서도 동작)
         listResults.AutoResizeColumns(ColumnHeaderAutoResizeStyle.ColumnContent);
-        if (colFileName.Width < 160) colFileName.Width = 160;
+        // 최소 너비 보장
+        if (colFileName.Width < 180) colFileName.Width = 180;
+        if (colPath.Width     < 200) colPath.Width     = 200;
+        if (colSize.Width     <  80) colSize.Width     =  80;
+        if (colModified.Width < 130) colModified.Width = 130;
+        if (colMatch.Width    <  70) colMatch.Width    =  70;
     }
 
     // ─────────────────────────────────────────────────────────
