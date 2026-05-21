@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>SFM.Tests</AssemblyName>
+    <RootNamespace>SFM.Tests</RootNamespace>
+    <!-- SFM.csproj 의 PublishSingleFile / SelfContained 는 빌드에 영향 없음 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      SFM 프로젝트의 Core / Data / Models 레이어를 직접 참조한다.
+      PublishSingleFile·SelfContained 를 테스트 빌드에서 비활성화하여 충돌 방지.
+    -->
+    <ProjectReference Include="..\SFM\SFM.csproj"
+                      Properties="PublishSingleFile=false;SelfContained=false;PublishReadyToRun=false" />
+  </ItemGroup>
+
+</Project>
