@@ -109,7 +109,6 @@ partial class MainForm
         // ─────────────────────────────────────────────────────────
         // SuspendLayout
         // ─────────────────────────────────────────────────────────
-        ((System.ComponentModel.ISupportInitialize)splitPreview).BeginInit();
         splitPreview.Panel1.SuspendLayout();
         splitPreview.Panel2.SuspendLayout();
         splitPreview.SuspendLayout();
@@ -431,7 +430,6 @@ partial class MainForm
         splitPreview.Panel1.ResumeLayout(false);
         splitPreview.Panel2.ResumeLayout(false);
         splitPreview.ResumeLayout(false);
-        ((System.ComponentModel.ISupportInitialize)splitPreview).EndInit();
 
         menuStrip.ResumeLayout(false);
         menuStrip.PerformLayout();
