@@ -108,6 +108,13 @@ public partial class MainForm : Form
 
         _watcher.StartWatching(_settings.IndexRootPaths);
         ActiveControl = txtSearch;
+
+        // 폼 크기 확정 후 SplitterDistance 설정 (InitializeComponent 시점에 설정하면 크기 제약 오류)
+        Load += (_, _) =>
+        {
+            try { splitMain.SplitterDistance = 220; }
+            catch { /* 폼 너비가 너무 좁은 경우 무시 */ }
+        };
     }
 
     // ─────────────────────────────────────────────────────────

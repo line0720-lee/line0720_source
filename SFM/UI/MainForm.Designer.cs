@@ -433,8 +433,8 @@ partial class MainForm
         splitMain.Name             = "splitMain";
         splitMain.Orientation      = Orientation.Vertical;
         splitMain.Panel1MinSize    = 120;
-        splitMain.Panel2MinSize    = 300;
-        splitMain.SplitterDistance = 220;
+        splitMain.Panel2MinSize    = 200;
+        // SplitterDistance는 Load 이벤트에서 폼 크기 확정 후 설정
         splitMain.SplitterWidth    = 5;
         splitMain.TabIndex         = 1;
 
