@@ -6,3 +6,10 @@ __pycache__/
 server.log
 fonts/
 .env
+
+# .NET 빌드 산출물
+bin/
+obj/
+publish/
+*.user
+.vs/
