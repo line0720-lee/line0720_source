@@ -8,7 +8,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>SFM.Tests</AssemblyName>
     <RootNamespace>SFM.Tests</RootNamespace>
-    <!-- SFM.csproj 의 PublishSingleFile / SelfContained 는 빌드에 영향 없음 -->
+    <!-- SFM이 SelfContained+win-x64 이므로 테스트도 동일 설정으로 맞춰야 참조 가능 -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
   </PropertyGroup>
 
   <ItemGroup>

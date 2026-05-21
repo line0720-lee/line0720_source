@@ -44,7 +44,15 @@ internal static class PerformanceTest
     static async Task Main(string[] args)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
-        Console.CursorVisible  = false;
+
+        // "verify" 인자로 실행하면 실제 DB 검색 동작 검증 (CursorVisible 설정 전에 분기)
+        if (args.Length > 0 && args[0] == "verify")
+        {
+            await VerifySearch.RunAsync();
+            return;
+        }
+
+        try { Console.CursorVisible = false; } catch { /* 비인터랙티브 콘솔 무시 */ }
 
         PrintHeader();
 
