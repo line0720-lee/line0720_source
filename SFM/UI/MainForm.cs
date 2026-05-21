@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Text;
-using System.Text.RegularExpressions;
 using SFM.Core;
 using SFM.Data;
 using SFM.Models;
@@ -31,15 +30,18 @@ public partial class MainForm : Form
     private readonly System.Windows.Forms.Timer _debounceTimer;
     private readonly ListBox                    _recentBox;
 
-    // ── 컬럼 정렬 상태 ────────────────────────────────────────
+    // 컬럼 정렬
     private int  _sortColumn    = -1;
     private bool _sortAscending = true;
-
-    // ── 컬럼 헤더 원본 텍스트 (정렬 화살표 토글용) ─────────────
     private readonly string[] _colHeaders = ["이름", "경로", "파일 크기", "수정 날짜", "유형"];
 
+    // 트리 상태
+    private const string TreePlaceholder = "\0placeholder";
+    // private int _treeSavedWidth = 220;   // 패널 토글 시 너비 복원용 (예약)
+    private bool _treeCheckSuppressed = false;   // 프로그래밍 체크 시 이벤트 억제
+
     // ─────────────────────────────────────────────────────────
-    // 파일유형 필터 (체크박스 멀티 선택)
+    // 파일유형 필터
     // ─────────────────────────────────────────────────────────
     private static readonly string[] ExtDoc   = [".docx",".doc",".xlsx",".xls",".pptx",".ppt",".txt",".md",".rtf"];
     private static readonly string[] ExtPdf   = [".pdf"];
@@ -48,7 +50,17 @@ public partial class MainForm : Form
                                                   ".go",".rs",".rb",".php",".swift",".kt",
                                                   ".html",".htm",".css",".scss",".sql",".sh",".bat",".ps1"];
 
-    /// <summary>현재 체크된 유형 체크박스에서 확장자 배열을 반환한다. 아무것도 없으면 빈 배열(=전체).</summary>
+    private static readonly Dictionary<string, int> ExtImageIndex =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            {".docx",1},{".doc",1},{".xlsx",1},{".xls",1},{".pptx",1},{".ppt",1},
+            {".txt",1},{".md",1},{".rtf",1},{".pdf",2},
+            {".jpg",3},{".jpeg",3},{".png",3},{".gif",3},{".bmp",3},{".svg",3},{".webp",3},{".ico",3},
+            {".cs",4},{".py",4},{".js",4},{".ts",4},{".java",4},{".cpp",4},{".c",4},{".h",4},
+            {".go",4},{".rs",4},{".rb",4},{".php",4},{".swift",4},{".kt",4},
+            {".html",4},{".htm",4},{".css",4},{".scss",4},{".sql",4},{".sh",4},{".bat",4},{".ps1",4},
+        };
+
     private string[] GetSelectedExtensions()
     {
         var list = new List<string>();
@@ -56,26 +68,8 @@ public partial class MainForm : Form
         if (chkTypePdf.Checked)   list.AddRange(ExtPdf);
         if (chkTypeImage.Checked) list.AddRange(ExtImage);
         if (chkTypeCode.Checked)  list.AddRange(ExtCode);
-        return list.ToArray();  // 빈 배열 = 전체 허용
+        return list.ToArray();
     }
-
-    // ─────────────────────────────────────────────────────────
-    // 파일 아이콘
-    // ─────────────────────────────────────────────────────────
-    private static readonly Dictionary<string, int> ExtImageIndex =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            {".docx",1},{".doc",1},{".xlsx",1},{".xls",1},
-            {".pptx",1},{".ppt",1},{".txt",1},{".md",1},{".rtf",1},
-            {".pdf",2},
-            {".jpg",3},{".jpeg",3},{".png",3},{".gif",3},
-            {".bmp",3},{".svg",3},{".webp",3},{".ico",3},
-            {".cs",4},{".py",4},{".js",4},{".ts",4},{".java",4},
-            {".cpp",4},{".c",4},{".h",4},{".go",4},{".rs",4},
-            {".rb",4},{".php",4},{".swift",4},{".kt",4},
-            {".html",4},{".htm",4},{".css",4},{".scss",4},
-            {".sql",4},{".sh",4},{".bat",4},{".ps1",4},
-        };
 
     // ─────────────────────────────────────────────────────────
     // 생성자
@@ -97,10 +91,8 @@ public partial class MainForm : Form
 
         _recentBox = new ListBox
         {
-            Visible        = false,
-            BorderStyle    = BorderStyle.FixedSingle,
-            IntegralHeight = false,
-            Font           = new Font("Segoe UI", 10F),
+            Visible = false, BorderStyle = BorderStyle.FixedSingle,
+            IntegralHeight = false, Font = new Font("Segoe UI", 10F),
         };
         _recentBox.MouseClick += OnRecentBoxClick;
         _recentBox.KeyDown    += OnRecentBoxKeyDown;
@@ -108,7 +100,7 @@ public partial class MainForm : Form
 
         InitImageList();
         InitPagination();
-        PopulateLocationDropdown();
+        InitFolderTree();
         WireEvents();
         ApplyTheme();
         RestoreWindowBounds();
@@ -123,68 +115,234 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     private void RestoreWindowBounds()
     {
-        if (_settings.WindowMaximized)
-        {
-            WindowState = FormWindowState.Maximized;
-            return;
-        }
+        if (_settings.WindowMaximized) { WindowState = FormWindowState.Maximized; return; }
         if (_settings.WindowX >= 0 && _settings.WindowY >= 0)
-        {
-            StartPosition = FormStartPosition.Manual;
-            Location      = new Point(_settings.WindowX, _settings.WindowY);
-        }
+        { StartPosition = FormStartPosition.Manual; Location = new Point(_settings.WindowX, _settings.WindowY); }
         Size = new Size(_settings.WindowWidth, _settings.WindowHeight);
     }
 
     // ─────────────────────────────────────────────────────────
-    // 위치 드롭다운 초기화
+    // 폴더 트리 초기화
     // ─────────────────────────────────────────────────────────
-    private void PopulateLocationDropdown()
+    private void InitFolderTree()
     {
-        cmbLocation.Items.Clear();
-        cmbLocation.Items.Add("모든 위치");
-        foreach (var path in _settings.IndexRootPaths)
+        _treeCheckSuppressed = true;
+        tvFolders.BeginUpdate();
+        tvFolders.Nodes.Clear();
+
+        foreach (var drive in DriveInfo.GetDrives())
         {
-            // 드라이브 루트면 "C:\" 식으로 간결하게, 아니면 마지막 폴더명
-            var label = IsRootPath(path)
-                ? path.ToUpper()
-                : $"{Path.GetFileName(path.TrimEnd('\\', '/'))} ({path})";
-            cmbLocation.Items.Add(label);
+            if (!drive.IsReady) continue;
+            try
+            {
+                var label = string.IsNullOrWhiteSpace(drive.VolumeLabel)
+                    ? drive.Name.TrimEnd('\\')
+                    : $"{drive.Name.TrimEnd('\\')}  [{drive.VolumeLabel}]";
+
+                var node = new TreeNode(label)
+                {
+                    Tag                = drive.RootDirectory.FullName,
+                    ImageIndex         = 0,
+                    SelectedImageIndex = 0,
+                    ToolTipText        = drive.RootDirectory.FullName,
+                };
+                // 드라이브 내부 탐색을 위한 플레이스홀더
+                node.Nodes.Add(new TreeNode(TreePlaceholder));
+                tvFolders.Nodes.Add(node);
+            }
+            catch { /* 접근 불가 드라이브 무시 */ }
         }
-        cmbLocation.SelectedIndex = 0;
+
+        tvFolders.EndUpdate();
+        _treeCheckSuppressed = false;
+        UpdateFolderButtonText();
     }
 
-    private static bool IsRootPath(string path)
-        => path.Length <= 3 && path.Contains(':');
+    /// <summary>노드 확장 시 하위 폴더를 지연 로드한다.</summary>
+    private void OnTreeBeforeExpand(object? sender, TreeViewCancelEventArgs e)
+    {
+        var node = e.Node!;
+        if (node.Tag is not string path) return;
+        if (node.Nodes.Count == 1 && node.Nodes[0].Text == TreePlaceholder)
+        {
+            node.Nodes.Clear();
+            LoadSubfolders(node, path);
+        }
+    }
+
+    private void LoadSubfolders(TreeNode parent, string path)
+    {
+        try
+        {
+            var dirs = Directory.GetDirectories(path)
+                .Where(d => !IsHiddenOrSystem(d))
+                .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            foreach (var dir in dirs)
+            {
+                var name  = Path.GetFileName(dir);
+                var child = new TreeNode(name)
+                {
+                    Tag                = dir,
+                    ImageIndex         = 1,
+                    SelectedImageIndex = 2,
+                    ToolTipText        = dir,
+                };
+                // 자식 폴더 유무 확인 (성능을 위해 Any() 사용)
+                try
+                {
+                    if (Directory.EnumerateDirectories(dir).Any())
+                        child.Nodes.Add(new TreeNode(TreePlaceholder));
+                }
+                catch { /* access denied */ }
+
+                parent.Nodes.Add(child);
+            }
+        }
+        catch { /* 접근 거부 폴더 무시 */ }
+    }
+
+    private static bool IsHiddenOrSystem(string path)
+    {
+        try
+        {
+            var attrs = File.GetAttributes(path);
+            return (attrs & (FileAttributes.Hidden | FileAttributes.System)) != 0;
+        }
+        catch { return true; }
+    }
+
+    /// <summary>체크된 폴더 경로 목록을 반환한다. 부모가 체크된 경우 자식은 수집하지 않는다.</summary>
+    private List<string> GetCheckedFolders()
+    {
+        var paths = new List<string>();
+        CollectCheckedNodes(tvFolders.Nodes, paths);
+        return paths;
+    }
+
+    private static void CollectCheckedNodes(TreeNodeCollection nodes, List<string> result)
+    {
+        foreach (TreeNode node in nodes)
+        {
+            if (node.Checked && node.Tag is string path)
+                result.Add(path);           // 부모 체크 → 자식 수집 불필요
+            else
+                CollectCheckedNodes(node.Nodes, result);
+        }
+    }
+
+    private void UpdateFolderButtonText()
+    {
+        var count = GetCheckedFolders().Count;
+        btnFolderPanel.Text = count == 0
+            ? "📂 모든 위치"
+            : $"📂 {count}개 선택";
+    }
 
     // ─────────────────────────────────────────────────────────
-    // 페이지네이션 초기화
+    // 이미지 리스트 초기화 (파일 아이콘 + 트리 아이콘)
+    // ─────────────────────────────────────────────────────────
+    private void InitImageList()
+    {
+        // 파일 목록 아이콘 (imgListSmall)
+        Color[] palette =
+        [
+            Color.FromArgb(130, 130, 130),
+            Color.FromArgb( 60, 120, 200),
+            Color.FromArgb(200,  60,  60),
+            Color.FromArgb(140,  70, 200),
+            Color.FromArgb( 50, 160,  90),
+        ];
+        foreach (var clr in palette)
+            imgListSmall.Images.Add(MakeFileIcon(clr));
+
+        // 트리 아이콘 (imgListTree)
+        imgListTree.Images.Add(MakeDriveIcon());              // 0: 드라이브
+        imgListTree.Images.Add(MakeFolderIcon(false));        // 1: 폴더 (닫힘)
+        imgListTree.Images.Add(MakeFolderIcon(true));         // 2: 폴더 (열림)
+    }
+
+    private static Bitmap MakeFileIcon(Color color)
+    {
+        var bmp = new Bitmap(16, 16);
+        using var g    = Graphics.FromImage(bmp);
+        using var fill = new SolidBrush(color);
+        using var pen  = new Pen(Color.FromArgb(80, Color.Black));
+        using var line = new Pen(Color.FromArgb(90, Color.White), 1f);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.Clear(Color.Transparent);
+        using var path = new System.Drawing.Drawing2D.GraphicsPath();
+        path.AddLines(new PointF[] { new(2,1), new(10,1), new(13,4), new(13,14), new(2,14), new(2,1) });
+        g.FillPath(fill, path);
+        g.DrawPath(pen, path);
+        using var fold = new SolidBrush(Color.FromArgb(60, Color.White));
+        g.FillPolygon(fold, new PointF[] { new(10,1), new(13,4), new(10,4) });
+        g.DrawLine(line, 4, 7, 11, 7);
+        g.DrawLine(line, 4, 9, 11, 9);
+        g.DrawLine(line, 4, 11, 9, 11);
+        return bmp;
+    }
+
+    private static Bitmap MakeDriveIcon()
+    {
+        var bmp = new Bitmap(16, 16);
+        using var g    = Graphics.FromImage(bmp);
+        using var fill = new SolidBrush(Color.FromArgb(90, 100, 120));
+        using var pen  = new Pen(Color.FromArgb(60, 70, 90));
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.Clear(Color.Transparent);
+        // 디스크 모양
+        g.FillEllipse(fill, 1, 4, 14, 9);
+        g.DrawEllipse(pen,  1, 4, 14, 9);
+        g.FillEllipse(fill, 1, 2, 14, 5);
+        g.DrawEllipse(pen,  1, 2, 14, 5);
+        using var hl = new SolidBrush(Color.FromArgb(80, Color.White));
+        g.FillEllipse(hl, 2, 2, 12, 3);
+        return bmp;
+    }
+
+    private static Bitmap MakeFolderIcon(bool open)
+    {
+        var bmp  = new Bitmap(16, 16);
+        using var g    = Graphics.FromImage(bmp);
+        var body = open ? Color.FromArgb(255, 200, 40) : Color.FromArgb(255, 185, 15);
+        var tab  = open ? Color.FromArgb(230, 170, 30) : Color.FromArgb(220, 160, 10);
+        using var bodyBrush = new SolidBrush(body);
+        using var tabBrush  = new SolidBrush(tab);
+        using var pen       = new Pen(Color.FromArgb(160, 120, 0));
+        g.SmoothingMode     = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.Clear(Color.Transparent);
+        // 탭
+        g.FillRectangle(tabBrush, 1, 4, 6, 3);
+        // 폴더 본체
+        g.FillRectangle(bodyBrush, 1, 6, 14, 8);
+        g.DrawRectangle(pen, 1, 6, 13, 7);
+        g.DrawRectangle(pen, 1, 4,  5, 2);
+        if (open)
+        {
+            // 열린 폴더: 약간 그림자
+            using var dark = new SolidBrush(Color.FromArgb(40, Color.Black));
+            g.FillRectangle(dark, 1, 13, 14, 1);
+        }
+        return bmp;
+    }
+
+    private static int GetImageIndex(string? ext) =>
+        !string.IsNullOrEmpty(ext) && ExtImageIndex.TryGetValue(ext, out var idx) ? idx : 0;
+
+    // ─────────────────────────────────────────────────────────
+    // 페이지네이션
     // ─────────────────────────────────────────────────────────
     private void InitPagination()
     {
         _sslPrevPage = new ToolStripButton("◀")
-        {
-            Enabled     = false,
-            Alignment   = ToolStripItemAlignment.Right,
-            ToolTipText = "이전 페이지 (Alt+←)",
-            Padding     = new Padding(4, 0, 4, 0),
-        };
+        { Enabled = false, Alignment = ToolStripItemAlignment.Right, ToolTipText = "이전 페이지 (Alt+←)", Padding = new Padding(4,0,4,0) };
         _sslNextPage = new ToolStripButton("▶")
-        {
-            Enabled     = false,
-            Alignment   = ToolStripItemAlignment.Right,
-            ToolTipText = "다음 페이지 (Alt+→)",
-            Padding     = new Padding(4, 0, 4, 0),
-        };
-        _sslPrevPage.Click += (_, _) =>
-        {
-            if (_currentPage > 0) { _currentPage--; _ = RunSearchAsync(); }
-        };
-        _sslNextPage.Click += (_, _) =>
-        {
-            _currentPage++;
-            _ = RunSearchAsync();
-        };
+        { Enabled = false, Alignment = ToolStripItemAlignment.Right, ToolTipText = "다음 페이지 (Alt+→)", Padding = new Padding(4,0,4,0) };
+
+        _sslPrevPage.Click += (_, _) => { if (_currentPage > 0) { _currentPage--; _ = RunSearchAsync(); } };
+        _sslNextPage.Click += (_, _) => { _currentPage++; _ = RunSearchAsync(); };
         statusStrip.Items.AddRange([_sslPrevPage, _sslNextPage]);
     }
 
@@ -193,26 +351,31 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     private void WireEvents()
     {
-        // ── 툴바 ─────────────────────────────────────────────
-        cmbLocation.SelectedIndexChanged += (_, _) =>
+        // ── 폴더 패널 토글 ─────────────────────────────────────
+        btnFolderPanel.Click += (_, _) =>
         {
+            splitMain.Panel1Collapsed = !splitMain.Panel1Collapsed;
+            tsmiViewFolderTree.Checked = !splitMain.Panel1Collapsed;
+        };
+
+        // ── 트리 이벤트 ─────────────────────────────────────────
+        tvFolders.BeforeExpand += OnTreeBeforeExpand;
+        tvFolders.AfterCheck   += OnTreeAfterCheck;
+
+        btnClearTree.Click += (_, _) =>
+        {
+            _treeCheckSuppressed = true;
+            ClearAllChecks(tvFolders.Nodes);
+            _treeCheckSuppressed = false;
+            UpdateFolderButtonText();
             if (txtSearch.Text.Trim().Length >= 2) _ = RunSearchAsync();
         };
 
-        btnSearch.Click += (_, _) =>
-        {
-            _debounceTimer.Stop();
-            _ = RunSearchAsync();
-        };
+        // ── 툴바 버튼 ────────────────────────────────────────────
+        btnSearch.Click += (_, _) => { _debounceTimer.Stop(); _ = RunSearchAsync(); };
+        btnClear.Click  += (_, _) => { txtSearch.Clear(); txtSearch.Focus(); };
 
-        btnClear.Click += (_, _) =>
-        {
-            txtSearch.Clear();
-            cmbLocation.SelectedIndex = 0;
-            txtSearch.Focus();
-        };
-
-        // ── 검색창 ───────────────────────────────────────────
+        // ── 검색창 ───────────────────────────────────────────────
         txtSearch.TextChanged += (_, _) =>
         {
             _recentBox.Visible = false;
@@ -223,52 +386,38 @@ public partial class MainForm : Form
         txtSearch.Leave   += OnSearchBoxLeave;
         txtSearch.KeyDown += OnSearchBoxKeyDown;
 
-        // ── 옵션 체크박스 ────────────────────────────────────
+        // ── 옵션 체크박스 ────────────────────────────────────────
         chkContent.CheckedChanged += (_, _) =>
         {
             _settings.EnableContentSearch = chkContent.Checked;
             tsmiSearchContent.Checked     = chkContent.Checked;
             _ = RunSearchAsync();
         };
-
-        // ── 유형 체크박스 (멀티 선택) ─────────────────────────
         EventHandler typeChanged = (_, _) => _ = RunSearchAsync();
         chkTypeDoc.CheckedChanged   += typeChanged;
         chkTypePdf.CheckedChanged   += typeChanged;
         chkTypeImage.CheckedChanged += typeChanged;
         chkTypeCode.CheckedChanged  += typeChanged;
 
-        // ── ListView ─────────────────────────────────────────
+        // ── ListView ─────────────────────────────────────────────
         listResults.RetrieveVirtualItem  += OnRetrieveVirtualItem;
         listResults.DoubleClick          += (_, _) => OpenSelectedFile();
         listResults.KeyDown              += OnListKeyDown;
         listResults.SelectedIndexChanged += OnListSelectionChanged;
         listResults.ColumnClick          += OnColumnClick;
 
-        // ── ContextMenu ──────────────────────────────────────
+        // ── ContextMenu ───────────────────────────────────────────
         cmsResult.Opening += (_, e) =>
         {
-            bool hasSel     = listResults.SelectedIndices.Count > 0;
-            bool hasResults = _results.Count > 0;
-
-            tsmiOpenFile.Enabled       = hasSel;
-            tsmiOpenFolder.Enabled     = hasSel;
-            tsmiMoveFile.Enabled       = hasSel;
-            tsmiDeleteFile.Enabled     = hasSel;
-            tsmiProperties.Enabled     = hasSel;
-            tsmiCopyPath.Enabled       = hasSel;
-            tsmiCopyDir.Enabled        = hasSel;
-            tsmiCopyName.Enabled       = hasSel;
-            tsmiDeleteFromIndex.Enabled = hasSel;
-
-            tsmiSelectAll.Enabled    = hasResults;
-            tsmiSelectNone.Enabled   = hasSel;
-            tsmiInvertSelect.Enabled = hasResults;
-            tsmiSaveAsText.Enabled   = hasResults;
-
-            if (!hasResults) e.Cancel = true;
+            bool hasSel = listResults.SelectedIndices.Count > 0, hasRes = _results.Count > 0;
+            tsmiOpenFile.Enabled = tsmiOpenFolder.Enabled = tsmiMoveFile.Enabled =
+                tsmiDeleteFile.Enabled = tsmiProperties.Enabled =
+                tsmiCopyPath.Enabled = tsmiCopyDir.Enabled =
+                tsmiCopyName.Enabled = tsmiDeleteFromIndex.Enabled = hasSel;
+            tsmiSelectAll.Enabled = tsmiInvertSelect.Enabled = tsmiSaveAsText.Enabled = hasRes;
+            tsmiSelectNone.Enabled = hasSel;
+            if (!hasRes) e.Cancel = true;
         };
-
         tsmiOpenFile.Click        += (_, _) => OpenSelectedFile();
         tsmiOpenFolder.Click      += (_, _) => OpenSelectedFolder();
         tsmiMoveFile.Click        += (_, _) => MoveSelectedFiles();
@@ -283,69 +432,72 @@ public partial class MainForm : Form
         tsmiSaveAsText.Click      += (_, _) => SaveResultsAsText();
         tsmiDeleteFromIndex.Click += OnDeleteFromIndex;
 
-        // ── 스니펫 닫기 버튼 ─────────────────────────────────
+        // ── 스니펫 닫기 ──────────────────────────────────────────
         btnSnippetClose.Click += (_, _) =>
-        {
-            pnlSnippet.Visible      = false;
-            tsmiViewSnippet.Checked = false;
-        };
+        { pnlSnippet.Visible = false; tsmiViewSnippet.Checked = false; };
 
-        // ── 메뉴: 파일 ───────────────────────────────────────
+        // ── 메뉴 ─────────────────────────────────────────────────
         tsmiFileNewWindow.Click += (_, _) => new MainForm().Show();
         tsmiFileExit.Click      += (_, _) => Close();
 
-        // ── 메뉴: 보기 ───────────────────────────────────────
-        tsmiViewDark.Click += (_, _) =>
+        tsmiViewDark.Click += (_, _) => { _settings.IsDarkMode = tsmiViewDark.Checked; ApplyTheme(); };
+        tsmiViewSnippet.Click     += (_, _) => pnlSnippet.Visible = tsmiViewSnippet.Checked;
+        tsmiViewFolderTree.Click  += (_, _) =>
         {
-            _settings.IsDarkMode = tsmiViewDark.Checked;
-            ApplyTheme();
+            splitMain.Panel1Collapsed = !tsmiViewFolderTree.Checked;
         };
-        tsmiViewSnippet.Click += (_, _) => pnlSnippet.Visible = tsmiViewSnippet.Checked;
         tsmiViewAutoCol.Click += (_, _) => AutoResizeColumns();
 
-        // ── 메뉴: 검색 ───────────────────────────────────────
         tsmiSearchContent.Click += (_, _) => chkContent.Checked = tsmiSearchContent.Checked;
         tsmiSearchClear.Click   += (_, _) => { txtSearch.Clear(); txtSearch.Focus(); };
 
-        // ── 메뉴: 도구 ───────────────────────────────────────
         tsmiToolsIndex.Click   += OnSettingsClick;
         tsmiToolsReindex.Click += OnReindexClick;
         tsmiToolsContent.Click += OnBuildContentClick;
         tsmiToolsVacuum.Click  += OnVacuumClick;
 
-        // ── 메뉴: 도움말 ─────────────────────────────────────
         tsmiHelpAbout.Click += (_, _) => MessageBox.Show(
-            "SFM — Smart File Manager v1.0\n\n" +
-            "로컬 파일 전문 검색 도구\n" +
-            "파일명 + 내용 인덱싱 · 한국어 초성 검색 지원\n\n" +
-            "단축키\n" +
-            "  Ctrl+F     검색창 포커스\n" +
-            "  F4         내용 검색 토글\n" +
-            "  F5         전체 재인덱싱\n" +
-            "  Enter      파일 열기 / 검색\n" +
-            "  Ctrl+C     경로 복사\n" +
-            "  Ctrl+A     전체 선택\n" +
-            "  Alt+←/→   이전/다음 페이지\n" +
-            "  Esc        검색어 지우기",
+            "SFM — Smart File Manager v1.0\n\n로컬 파일 전문 검색 도구\n" +
+            "파일명 + 내용 인덱싱 · 한국어 초성 검색 지원\n\n단축키\n" +
+            "  Ctrl+F     검색창 포커스\n  Ctrl+T     폴더 트리 토글\n" +
+            "  F4         내용 검색 토글\n  F5         전체 재인덱싱\n" +
+            "  Enter      파일 열기 / 검색\n  Ctrl+C     경로 복사\n" +
+            "  Ctrl+A     전체 선택\n  Alt+←/→   이전/다음 페이지\n  Esc        검색어 지우기",
             "SFM 정보", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-        // ── Indexer 이벤트 ───────────────────────────────────
+        // ── Indexer 이벤트 ───────────────────────────────────────
         _indexer.IndexProgressChanged += p => Invoke(() =>
-            sslIndexStatus.Text =
-                $"[{p.Phase}] {p.Processed:N0}/{p.Total:N0}  {Path.GetFileName(p.FilePath)}");
+            sslIndexStatus.Text = $"[{p.Phase}] {p.Processed:N0}/{p.Total:N0}  {Path.GetFileName(p.FilePath)}");
 
         _indexer.IndexCompleted += r => Invoke(() =>
         {
             sslIndexStatus.Text = $"완료 {r.TotalIndexed:N0}개  +{r.Added} ~{r.Updated} -{r.Deleted}  {r.Elapsed.TotalSeconds:F1}s";
             sslLastIndexed.Text = $"인덱싱: {DateTime.Now:HH:mm}";
             RefreshDbStats();
-            PopulateLocationDropdown();  // 경로가 바뀌었을 수 있으므로 갱신
-            if (!string.IsNullOrWhiteSpace(txtSearch.Text))
-                _ = RunSearchAsync();
+            if (!string.IsNullOrWhiteSpace(txtSearch.Text)) _ = RunSearchAsync();
         });
+        _indexer.IndexErrorOccurred += err => Debug.WriteLine($"[IndexError] {err.FilePath}: {err.Message}");
+    }
 
-        _indexer.IndexErrorOccurred += err =>
-            Debug.WriteLine($"[IndexError] {err.FilePath}: {err.Message}");
+    private static void ClearAllChecks(TreeNodeCollection nodes)
+    {
+        foreach (TreeNode node in nodes)
+        {
+            node.Checked = false;
+            if (node.Nodes.Count > 0) ClearAllChecks(node.Nodes);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // 트리 AfterCheck
+    // ─────────────────────────────────────────────────────────
+    private void OnTreeAfterCheck(object? sender, TreeViewEventArgs e)
+    {
+        if (_treeCheckSuppressed) return;
+        if (e.Action == TreeViewAction.Unknown) return;  // 프로그래밍 조작 무시
+
+        UpdateFolderButtonText();
+        if (txtSearch.Text.Trim().Length >= 2) _ = RunSearchAsync();
     }
 
     // ─────────────────────────────────────────────────────────
@@ -365,164 +517,92 @@ public partial class MainForm : Form
         var text = Color.FromArgb(220, 220, 220);
         var gray = Color.FromArgb(140, 140, 140);
 
-        BackColor = bg;
-        ForeColor = text;
+        BackColor = bg; ForeColor = text;
+        menuStrip.BackColor = Color.FromArgb(37, 37, 38); menuStrip.ForeColor = text;
+        foreach (ToolStripMenuItem m in menuStrip.Items.OfType<ToolStripMenuItem>()) m.ForeColor = text;
 
-        menuStrip.BackColor = Color.FromArgb(37, 37, 38);
-        menuStrip.ForeColor = text;
-        foreach (ToolStripMenuItem m in menuStrip.Items.OfType<ToolStripMenuItem>())
-            m.ForeColor = text;
-
-        pnlSearch.BackColor  = Color.FromArgb(37, 37, 38);
-        tblToolbar.BackColor = Color.FromArgb(37, 37, 38);
+        pnlSearch.BackColor = tblToolbar.BackColor = Color.FromArgb(37, 37, 38);
         pnlOptions.BackColor = Color.FromArgb(37, 37, 38);
 
-        cmbLocation.BackColor = surf;
-        cmbLocation.ForeColor = text;
+        btnFolderPanel.BackColor = Color.FromArgb(55, 55, 58);
+        btnFolderPanel.ForeColor = text;
+        btnFolderPanel.FlatAppearance.BorderColor = Color.FromArgb(70, 70, 75);
 
-        txtSearch.BackColor   = surf;
-        txtSearch.ForeColor   = text;
-        txtSearch.BorderStyle = BorderStyle.FixedSingle;
+        txtSearch.BackColor = surf; txtSearch.ForeColor = text; txtSearch.BorderStyle = BorderStyle.FixedSingle;
+        btnClear.BackColor = Color.FromArgb(37, 37, 38); btnClear.ForeColor = gray;
+        btnSearch.BackColor = Color.FromArgb(0, 100, 180); btnSearch.ForeColor = Color.White;
 
-        btnClear.BackColor = Color.FromArgb(37, 37, 38);
-        btnClear.ForeColor = gray;
+        chkContent.ForeColor = text; lblFilter.ForeColor = gray;
+        chkTypeDoc.ForeColor = chkTypePdf.ForeColor = chkTypeImage.ForeColor = chkTypeCode.ForeColor = text;
+        lblDbInfo.ForeColor = gray;
 
-        // 다크모드에서도 검색 버튼은 파란색 유지
-        btnSearch.BackColor = Color.FromArgb(0, 100, 180);
-        btnSearch.ForeColor = Color.White;
+        // 트리 패널
+        pnlTreeHeader.BackColor = Color.FromArgb(37, 37, 38);
+        lblTreeTitle.ForeColor  = text;
+        btnClearTree.BackColor  = Color.FromArgb(50, 50, 55);
+        btnClearTree.ForeColor  = gray;
+        tvFolders.BackColor     = Color.FromArgb(30, 30, 32);
+        tvFolders.ForeColor     = text;
 
-        chkContent.ForeColor   = text;
-        lblFilter.ForeColor    = gray;
-        chkTypeDoc.ForeColor   = text;
-        chkTypePdf.ForeColor   = text;
-        chkTypeImage.ForeColor = text;
-        chkTypeCode.ForeColor  = text;
-        lblDbInfo.ForeColor    = gray;
+        listResults.BackColor = Color.FromArgb(25, 25, 25); listResults.ForeColor = text;
 
-        listResults.BackColor = Color.FromArgb(25, 25, 25);
-        listResults.ForeColor = text;
-
-        pnlSnippet.BackColor    = Color.FromArgb(35, 35, 35);
+        pnlSnippet.BackColor = Color.FromArgb(35, 35, 35);
         pnlSnippetBar.BackColor = Color.FromArgb(50, 50, 50);
-        lblSnippetIcon.ForeColor = text;
-        lblSnippetPath.ForeColor = gray;
-        btnSnippetClose.BackColor = Color.FromArgb(50, 50, 50);
-        btnSnippetClose.ForeColor = gray;
-        rtbSnippet.BackColor    = Color.FromArgb(25, 25, 25);
-        rtbSnippet.ForeColor    = text;
+        lblSnippetIcon.ForeColor = text; lblSnippetPath.ForeColor = gray;
+        btnSnippetClose.BackColor = Color.FromArgb(50, 50, 50); btnSnippetClose.ForeColor = gray;
+        rtbSnippet.BackColor = Color.FromArgb(25, 25, 25); rtbSnippet.ForeColor = text;
 
-        statusStrip.BackColor = surf;
-        statusStrip.ForeColor = text;
-        foreach (ToolStripItem item in statusStrip.Items)
-            item.ForeColor = text;
-        _sslPrevPage.ForeColor = text;
-        _sslNextPage.ForeColor = text;
+        statusStrip.BackColor = surf; statusStrip.ForeColor = text;
+        foreach (ToolStripItem item in statusStrip.Items) item.ForeColor = text;
+        _sslPrevPage.ForeColor = _sslNextPage.ForeColor = text;
 
-        _recentBox.BackColor = surf;
-        _recentBox.ForeColor = text;
+        _recentBox.BackColor = surf; _recentBox.ForeColor = text;
     }
 
     private void ApplyLightTheme()
     {
         var toolbar = Color.FromArgb(240, 240, 240);
+        BackColor = SystemColors.Window; ForeColor = SystemColors.WindowText;
+        menuStrip.BackColor = SystemColors.MenuBar; menuStrip.ForeColor = SystemColors.MenuText;
 
-        BackColor = SystemColors.Window;
-        ForeColor = SystemColors.WindowText;
-
-        menuStrip.BackColor = SystemColors.MenuBar;
-        menuStrip.ForeColor = SystemColors.MenuText;
-
-        pnlSearch.BackColor  = toolbar;
-        tblToolbar.BackColor = toolbar;
+        pnlSearch.BackColor = tblToolbar.BackColor = toolbar;
         pnlOptions.BackColor = Color.FromArgb(248, 248, 248);
 
-        cmbLocation.BackColor = SystemColors.Window;
-        cmbLocation.ForeColor = SystemColors.WindowText;
+        btnFolderPanel.BackColor = SystemColors.Window;
+        btnFolderPanel.ForeColor = SystemColors.WindowText;
+        btnFolderPanel.FlatAppearance.BorderColor = Color.FromArgb(180, 180, 180);
 
-        txtSearch.BackColor   = SystemColors.Window;
-        txtSearch.ForeColor   = SystemColors.WindowText;
+        txtSearch.BackColor = SystemColors.Window; txtSearch.ForeColor = SystemColors.WindowText;
         txtSearch.BorderStyle = BorderStyle.FixedSingle;
+        btnClear.BackColor = toolbar; btnClear.ForeColor = Color.FromArgb(100, 100, 100);
+        btnSearch.BackColor = Color.FromArgb(0, 120, 212); btnSearch.ForeColor = Color.White;
 
-        btnClear.BackColor = toolbar;
-        btnClear.ForeColor = Color.FromArgb(100, 100, 100);
+        chkContent.ForeColor = SystemColors.WindowText; lblFilter.ForeColor = SystemColors.GrayText;
+        chkTypeDoc.ForeColor = chkTypePdf.ForeColor = chkTypeImage.ForeColor = chkTypeCode.ForeColor = SystemColors.WindowText;
+        lblDbInfo.ForeColor = SystemColors.GrayText;
 
-        btnSearch.BackColor = Color.FromArgb(0, 120, 212);
-        btnSearch.ForeColor = Color.White;
+        // 트리 패널
+        pnlTreeHeader.BackColor = Color.FromArgb(235, 235, 235);
+        lblTreeTitle.ForeColor  = SystemColors.WindowText;
+        btnClearTree.BackColor  = Color.FromArgb(235, 235, 235);
+        btnClearTree.ForeColor  = SystemColors.GrayText;
+        tvFolders.BackColor     = SystemColors.Window;
+        tvFolders.ForeColor     = SystemColors.WindowText;
 
-        chkContent.ForeColor   = SystemColors.WindowText;
-        lblFilter.ForeColor    = SystemColors.GrayText;
-        chkTypeDoc.ForeColor   = SystemColors.WindowText;
-        chkTypePdf.ForeColor   = SystemColors.WindowText;
-        chkTypeImage.ForeColor = SystemColors.WindowText;
-        chkTypeCode.ForeColor  = SystemColors.WindowText;
-        lblDbInfo.ForeColor    = SystemColors.GrayText;
+        listResults.BackColor = SystemColors.Window; listResults.ForeColor = SystemColors.WindowText;
 
-        listResults.BackColor = SystemColors.Window;
-        listResults.ForeColor = SystemColors.WindowText;
-
-        pnlSnippet.BackColor    = Color.FromArgb(252, 252, 252);
+        pnlSnippet.BackColor = Color.FromArgb(252, 252, 252);
         pnlSnippetBar.BackColor = Color.FromArgb(235, 235, 235);
-        lblSnippetIcon.ForeColor = SystemColors.WindowText;
-        lblSnippetPath.ForeColor = SystemColors.GrayText;
-        btnSnippetClose.BackColor = Color.FromArgb(235, 235, 235);
-        btnSnippetClose.ForeColor = SystemColors.GrayText;
-        rtbSnippet.BackColor    = Color.FromArgb(252, 252, 252);
-        rtbSnippet.ForeColor    = SystemColors.WindowText;
+        lblSnippetIcon.ForeColor = SystemColors.WindowText; lblSnippetPath.ForeColor = SystemColors.GrayText;
+        btnSnippetClose.BackColor = Color.FromArgb(235, 235, 235); btnSnippetClose.ForeColor = SystemColors.GrayText;
+        rtbSnippet.BackColor = Color.FromArgb(252, 252, 252); rtbSnippet.ForeColor = SystemColors.WindowText;
 
-        statusStrip.BackColor = toolbar;
-        statusStrip.ForeColor = SystemColors.WindowText;
-        foreach (ToolStripItem item in statusStrip.Items)
-            item.ForeColor = SystemColors.WindowText;
-        _sslPrevPage.ForeColor = SystemColors.WindowText;
-        _sslNextPage.ForeColor = SystemColors.WindowText;
+        statusStrip.BackColor = toolbar; statusStrip.ForeColor = SystemColors.WindowText;
+        foreach (ToolStripItem item in statusStrip.Items) item.ForeColor = SystemColors.WindowText;
+        _sslPrevPage.ForeColor = _sslNextPage.ForeColor = SystemColors.WindowText;
 
-        _recentBox.BackColor = SystemColors.Window;
-        _recentBox.ForeColor = SystemColors.WindowText;
+        _recentBox.BackColor = SystemColors.Window; _recentBox.ForeColor = SystemColors.WindowText;
     }
-
-    // ─────────────────────────────────────────────────────────
-    // 파일 아이콘
-    // ─────────────────────────────────────────────────────────
-    private void InitImageList()
-    {
-        Color[] palette =
-        [
-            Color.FromArgb(130, 130, 130),  // 0: 기본
-            Color.FromArgb( 60, 120, 200),  // 1: 문서
-            Color.FromArgb(200,  60,  60),  // 2: PDF
-            Color.FromArgb(140,  70, 200),  // 3: 이미지
-            Color.FromArgb( 50, 160,  90),  // 4: 코드
-        ];
-        foreach (var clr in palette)
-            imgListSmall.Images.Add(MakeFileIcon(clr));
-    }
-
-    private static Bitmap MakeFileIcon(Color color)
-    {
-        var bmp = new Bitmap(16, 16);
-        using var g    = Graphics.FromImage(bmp);
-        using var fill = new SolidBrush(color);
-        using var pen  = new Pen(Color.FromArgb(80, Color.Black));
-        using var line = new Pen(Color.FromArgb(90, Color.White), 1f);
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        g.Clear(Color.Transparent);
-        using var path = new System.Drawing.Drawing2D.GraphicsPath();
-        path.AddLines(new PointF[] {
-            new(2, 1), new(10, 1), new(13, 4), new(13, 14),
-            new(2, 14), new(2, 1)
-        });
-        g.FillPath(fill, path);
-        g.DrawPath(pen, path);
-        using var fold = new SolidBrush(Color.FromArgb(60, Color.White));
-        g.FillPolygon(fold, new PointF[] { new(10, 1), new(13, 4), new(10, 4) });
-        g.DrawLine(line, 4, 7, 11, 7);
-        g.DrawLine(line, 4, 9, 11, 9);
-        g.DrawLine(line, 4, 11, 9, 11);
-        return bmp;
-    }
-
-    private static int GetImageIndex(string? ext) =>
-        !string.IsNullOrEmpty(ext) && ExtImageIndex.TryGetValue(ext, out var idx) ? idx : 0;
 
     // ─────────────────────────────────────────────────────────
     // VirtualMode
@@ -552,31 +632,27 @@ public partial class MainForm : Form
         if (_results.Count == 0) return;
         if (_sortColumn == e.Column) _sortAscending = !_sortAscending;
         else { _sortColumn = e.Column; _sortAscending = true; }
-
         _results = SortResults(_results, _sortColumn, _sortAscending);
         for (int i = 0; i < listResults.Columns.Count; i++)
             listResults.Columns[i].Text = i == _sortColumn
-                ? _colHeaders[i] + (_sortAscending ? "  ▲" : "  ▼")
-                : _colHeaders[i];
+                ? _colHeaders[i] + (_sortAscending ? "  ▲" : "  ▼") : _colHeaders[i];
         listResults.Invalidate();
     }
 
     private static List<SearchResult> SortResults(List<SearchResult> src, int col, bool asc)
     {
-        IOrderedEnumerable<SearchResult> ordered = col switch
+        IOrderedEnumerable<SearchResult> o = col switch
         {
             0 => asc ? src.OrderBy(r => r.FileName, StringComparer.OrdinalIgnoreCase)
                      : src.OrderByDescending(r => r.FileName, StringComparer.OrdinalIgnoreCase),
             1 => asc ? src.OrderBy(r => Path.GetDirectoryName(r.FilePath) ?? "", StringComparer.OrdinalIgnoreCase)
                      : src.OrderByDescending(r => Path.GetDirectoryName(r.FilePath) ?? "", StringComparer.OrdinalIgnoreCase),
-            2 => asc ? src.OrderBy(r => r.FileSize)
-                     : src.OrderByDescending(r => r.FileSize),
-            3 => asc ? src.OrderBy(r => r.ModifiedAt)
-                     : src.OrderByDescending(r => r.ModifiedAt),
+            2 => asc ? src.OrderBy(r => r.FileSize) : src.OrderByDescending(r => r.FileSize),
+            3 => asc ? src.OrderBy(r => r.ModifiedAt) : src.OrderByDescending(r => r.ModifiedAt),
             _ => asc ? src.OrderBy(r => r.Extension ?? "", StringComparer.OrdinalIgnoreCase)
                      : src.OrderByDescending(r => r.Extension ?? "", StringComparer.OrdinalIgnoreCase),
         };
-        return ordered.ToList();
+        return o.ToList();
     }
 
     // ─────────────────────────────────────────────────────────
@@ -590,12 +666,7 @@ public partial class MainForm : Form
 
     private void UpdateSnippetPanel(SearchResult? r)
     {
-        if (r is null)
-        {
-            lblSnippetPath.Text = "항목을 선택하면 미리보기가 표시됩니다";
-            rtbSnippet.Clear();
-            return;
-        }
+        if (r is null) { lblSnippetPath.Text = "항목을 선택하면 미리보기가 표시됩니다"; rtbSnippet.Clear(); return; }
         lblSnippetPath.Text = r.FilePath;
         rtbSnippet.Clear();
         if (!string.IsNullOrWhiteSpace(r.Snippet))
@@ -606,21 +677,18 @@ public partial class MainForm : Form
         else
         {
             rtbSnippet.ForeColor = SystemColors.GrayText;
-            rtbSnippet.Text      = r.MatchedInContent
-                ? "(내용 미리보기를 가져오는 중…)"
-                : "(파일명으로 일치)";
+            rtbSnippet.Text = r.MatchedInContent ? "(내용 미리보기를 가져오는 중…)" : "(파일명으로 일치)";
         }
     }
 
     private void HighlightKeywordInSnippet(string keyword)
     {
         if (string.IsNullOrEmpty(keyword) || string.IsNullOrEmpty(rtbSnippet.Text)) return;
-        var text       = rtbSnippet.Text;
-        var comparison = StringComparison.OrdinalIgnoreCase;
+        var text = rtbSnippet.Text;
         int start = 0;
         while (true)
         {
-            int idx = text.IndexOf(keyword, start, comparison);
+            int idx = text.IndexOf(keyword, start, StringComparison.OrdinalIgnoreCase);
             if (idx < 0) break;
             rtbSnippet.Select(idx, keyword.Length);
             rtbSnippet.SelectionBackColor = Color.FromArgb(255, 240, 0);
@@ -634,37 +702,20 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     // 검색
     // ─────────────────────────────────────────────────────────
-    private void OnDebounceTimerTick(object? sender, EventArgs e)
-    {
-        _debounceTimer.Stop();
-        _ = RunSearchAsync();
-    }
+    private void OnDebounceTimerTick(object? sender, EventArgs e) { _debounceTimer.Stop(); _ = RunSearchAsync(); }
 
     private async Task RunSearchAsync()
     {
         var keyword = txtSearch.Text.Trim();
-
         if (keyword.Length < 2)
         {
-            _results     = [];
-            _currentPage = 0;
-            _lastKeyword = string.Empty;
-            listResults.VirtualListSize = 0;
-            sslResultCount.Text         = "준비";
-            _sslPrevPage.Enabled        = false;
-            _sslNextPage.Enabled        = false;
-            ResetSortHeaders();
-            UpdateSnippetPanel(null);
-            Text = "SFM — Smart File Manager";
-            return;
+            _results = []; _currentPage = 0; _lastKeyword = string.Empty;
+            listResults.VirtualListSize = 0; sslResultCount.Text = "준비";
+            _sslPrevPage.Enabled = _sslNextPage.Enabled = false;
+            ResetSortHeaders(); UpdateSnippetPanel(null);
+            Text = "SFM — Smart File Manager"; return;
         }
-
-        if (keyword != _lastKeyword)
-        {
-            _currentPage = 0;
-            _lastKeyword = keyword;
-            ResetSortHeaders();
-        }
+        if (keyword != _lastKeyword) { _currentPage = 0; _lastKeyword = keyword; ResetSortHeaders(); }
 
         var query = new SearchQuery
         {
@@ -674,52 +725,39 @@ public partial class MainForm : Form
             Extensions      = GetSelectedExtensions(),
             Page            = _currentPage,
         };
-
-        sslResultCount.Text  = "검색 중…";
-        _sslPrevPage.Enabled = false;
-        _sslNextPage.Enabled = false;
+        sslResultCount.Text = "검색 중…"; _sslPrevPage.Enabled = _sslNextPage.Enabled = false;
 
         try
         {
             var sw      = Stopwatch.StartNew();
             var results = await _searcher.SearchAsync(query);
             sw.Stop();
+            if (txtSearch.Text.Trim() != keyword) return;
 
-            if (txtSearch.Text.Trim() != keyword) return;  // stale guard
-
-            // 위치 필터 적용 (선택된 경로로 좁히기)
-            if (cmbLocation.SelectedIndex > 0
-                && cmbLocation.SelectedIndex - 1 < _settings.IndexRootPaths.Length)
+            // ── 폴더 트리 선택 필터 ───────────────────────────────
+            var checkedFolders = GetCheckedFolders();
+            if (checkedFolders.Count > 0)
             {
-                var rootPath = _settings.IndexRootPaths[cmbLocation.SelectedIndex - 1];
                 results = results
-                    .Where(r => r.FilePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+                    .Where(r => checkedFolders.Any(f =>
+                        r.FilePath.StartsWith(f, StringComparison.OrdinalIgnoreCase)))
                     .ToList();
             }
 
-            _results                    = results;
-            _sortColumn                 = -1;
+            _results = results; _sortColumn = -1;
             listResults.VirtualListSize = _results.Count;
             listResults.Invalidate();
 
             _sslPrevPage.Enabled = _currentPage > 0;
             _sslNextPage.Enabled = _results.Count >= _settings.MaxSearchResults;
 
-            // Wise JetSearch 스타일 상태 메시지
             var elapsed = sw.Elapsed.TotalSeconds;
-            sslResultCount.Text = _results.Count switch
-            {
-                0 when _currentPage > 0 => "마지막 페이지",
-                0 => $"검색 완료.  결과 없음.  경과 시간: {elapsed:F2} 초",
-                _ => $"검색 완료.  {_results.Count:N0} 파일/폴더 발견.  경과 시간: {elapsed:F3} 초",
-            };
+            sslResultCount.Text = _results.Count == 0
+                ? $"검색 완료.  결과 없음.  경과 시간: {elapsed:F3} 초"
+                : $"검색 완료.  {_results.Count:N0} 파일/폴더 발견.  경과 시간: {elapsed:F3} 초";
 
-            Text = _results.Count > 0
-                ? $"SFM — \"{keyword}\" ({_results.Count:N0}개)"
-                : "SFM — Smart File Manager";
-
-            if (_results.Count > 0 && pnlSnippet.Visible)
-                UpdateSnippetPanel(_results[0]);
+            Text = _results.Count > 0 ? $"SFM — \"{keyword}\" ({_results.Count:N0}개)" : "SFM — Smart File Manager";
+            if (_results.Count > 0 && pnlSnippet.Visible) UpdateSnippetPanel(_results[0]);
         }
         catch (Exception ex)
         {
@@ -730,17 +768,14 @@ public partial class MainForm : Form
 
     private void ResetSortHeaders()
     {
-        _sortColumn    = -1;
-        _sortAscending = true;
-        for (int i = 0; i < listResults.Columns.Count; i++)
-            listResults.Columns[i].Text = _colHeaders[i];
+        _sortColumn = -1; _sortAscending = true;
+        for (int i = 0; i < listResults.Columns.Count; i++) listResults.Columns[i].Text = _colHeaders[i];
     }
 
     // ─────────────────────────────────────────────────────────
     // 최근 검색어 드롭다운
     // ─────────────────────────────────────────────────────────
     private void OnSearchBoxEnter(object? sender, EventArgs e) => ShowRecentDropdown();
-
     private void OnSearchBoxLeave(object? sender, EventArgs e)
         => BeginInvoke(() => _recentBox.Visible = false);
 
@@ -751,111 +786,69 @@ public partial class MainForm : Form
             case Keys.Down when _recentBox.Visible:
                 _recentBox.Focus();
                 if (_recentBox.Items.Count > 0) _recentBox.SelectedIndex = 0;
-                e.Handled = true;
-                break;
+                e.Handled = true; break;
             case Keys.Escape:
-                if (_recentBox.Visible) _recentBox.Visible = false;
-                else                    txtSearch.Clear();
-                e.Handled = true;
-                break;
+                if (_recentBox.Visible) _recentBox.Visible = false; else txtSearch.Clear();
+                e.Handled = true; break;
             case Keys.Enter:
-                _debounceTimer.Stop();
-                _ = RunSearchAsync();
-                e.Handled = true;
-                break;
+                _debounceTimer.Stop(); _ = RunSearchAsync(); e.Handled = true; break;
         }
     }
 
     private void OnRecentBoxClick(object? sender, MouseEventArgs e)
     {
-        if (_recentBox.SelectedItem is string sel)
-        {
-            txtSearch.Text           = sel;
-            txtSearch.SelectionStart = sel.Length;
-        }
-        _recentBox.Visible = false;
-        txtSearch.Focus();
+        if (_recentBox.SelectedItem is string sel) { txtSearch.Text = sel; txtSearch.SelectionStart = sel.Length; }
+        _recentBox.Visible = false; txtSearch.Focus();
     }
 
     private void OnRecentBoxKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.KeyCode == Keys.Enter && _recentBox.SelectedItem is string sel)
-        {
-            txtSearch.Text     = sel;
-            _recentBox.Visible = false;
-            txtSearch.Focus();
-            _ = RunSearchAsync();
-            e.Handled = true;
-        }
-        else if (e.KeyCode == Keys.Escape)
-        {
-            _recentBox.Visible = false;
-            txtSearch.Focus();
-            e.Handled = true;
-        }
+        { txtSearch.Text = sel; _recentBox.Visible = false; txtSearch.Focus(); _ = RunSearchAsync(); e.Handled = true; }
+        else if (e.KeyCode == Keys.Escape) { _recentBox.Visible = false; txtSearch.Focus(); e.Handled = true; }
     }
 
     private void ShowRecentDropdown()
     {
         var recents = _db.GetRecentSearches(8);
         if (recents.Count == 0) return;
-
         _recentBox.Items.Clear();
         foreach (var s in recents) _recentBox.Items.Add(s);
-
         var screenPt = txtSearch.Parent!.PointToScreen(txtSearch.Location);
         var formPt   = PointToClient(screenPt);
         _recentBox.Location = new Point(formPt.X, pnlSearch.Bottom);
         _recentBox.Width    = txtSearch.Width;
         _recentBox.Height   = Math.Min(recents.Count * 22 + 4, 180);
-        _recentBox.BringToFront();
-        _recentBox.Visible = true;
+        _recentBox.BringToFront(); _recentBox.Visible = true;
     }
 
     // ─────────────────────────────────────────────────────────
-    // 키보드 단축키 (폼 레벨)
+    // 키보드 단축키
     // ─────────────────────────────────────────────────────────
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         switch (keyData)
         {
             case Keys.Enter when txtSearch.Focused:
-                if (_recentBox.Visible)
-                {
-                    if (_recentBox.SelectedItem is string sel) txtSearch.Text = sel;
-                    _recentBox.Visible = false;
-                }
-                _debounceTimer.Stop();
-                _ = RunSearchAsync();
-                return true;
-
+                if (_recentBox.Visible) { if (_recentBox.SelectedItem is string sel) txtSearch.Text = sel; _recentBox.Visible = false; }
+                _debounceTimer.Stop(); _ = RunSearchAsync(); return true;
             case Keys.Control | Keys.F:
-                txtSearch.Focus();
-                txtSearch.SelectAll();
+                txtSearch.Focus(); txtSearch.SelectAll(); return true;
+            case Keys.Control | Keys.T:
+                splitMain.Panel1Collapsed = !splitMain.Panel1Collapsed;
+                tsmiViewFolderTree.Checked = !splitMain.Panel1Collapsed;
                 return true;
-
             case Keys.Control | Keys.A when listResults.ContainsFocus || listResults.Focused:
-                SelectAll();
-                return true;
-
+                SelectAll(); return true;
             case Keys.Control | Keys.C when listResults.Focused:
-                CopySelectedPaths();
-                return true;
-
+                CopySelectedPaths(); return true;
             case Keys.Alt | Keys.Left when _sslPrevPage.Enabled:
-                _currentPage--;
-                _ = RunSearchAsync();
-                return true;
-
+                _currentPage--; _ = RunSearchAsync(); return true;
             case Keys.Alt | Keys.Right when _sslNextPage.Enabled:
-                _currentPage++;
-                _ = RunSearchAsync();
-                return true;
-
+                _currentPage++; _ = RunSearchAsync(); return true;
             case Keys.F4:
-                chkContent.Checked        = !chkContent.Checked;
-                tsmiSearchContent.Checked = chkContent.Checked;
-                return true;
+                chkContent.Checked = !chkContent.Checked;
+                tsmiSearchContent.Checked = chkContent.Checked; return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);
     }
@@ -867,14 +860,8 @@ public partial class MainForm : Form
     {
         switch (e.KeyCode)
         {
-            case Keys.Enter or Keys.Return:
-                OpenSelectedFile();
-                e.Handled = true;
-                break;
-            case Keys.Delete:
-                OnDeleteFromIndex(sender, e);
-                e.Handled = true;
-                break;
+            case Keys.Enter or Keys.Return: OpenSelectedFile(); e.Handled = true; break;
+            case Keys.Delete: OnDeleteFromIndex(sender, e); e.Handled = true; break;
         }
     }
 
@@ -887,7 +874,6 @@ public partial class MainForm : Form
         var idx = listResults.SelectedIndices[0];
         return idx < _results.Count ? _results[idx] : null;
     }
-
     private IEnumerable<SearchResult> GetSelectedResults()
     {
         foreach (int idx in listResults.SelectedIndices)
@@ -896,46 +882,24 @@ public partial class MainForm : Form
 
     private void OpenSelectedFile()
     {
-        var r = GetSelectedResult();
-        if (r is null) return;
+        var r = GetSelectedResult(); if (r is null) return;
         try { Process.Start(new ProcessStartInfo(r.FilePath) { UseShellExecute = true }); }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"파일을 열 수 없습니다.\n{ex.Message}",
-                "SFM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
+        catch (Exception ex) { MessageBox.Show($"파일을 열 수 없습니다.\n{ex.Message}", "SFM", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     }
 
     private void OpenSelectedFolder()
     {
-        var r = GetSelectedResult();
-        if (r is null) return;
-        try
-        {
-            Process.Start(new ProcessStartInfo("explorer.exe",
-                $"/select,\"{r.FilePath}\"") { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"폴더를 열 수 없습니다.\n{ex.Message}",
-                "SFM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
+        var r = GetSelectedResult(); if (r is null) return;
+        try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{r.FilePath}\"") { UseShellExecute = true }); }
+        catch (Exception ex) { MessageBox.Show($"폴더를 열 수 없습니다.\n{ex.Message}", "SFM", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     }
 
     private void MoveSelectedFiles()
     {
-        var selected = GetSelectedResults().ToList();
-        if (selected.Count == 0) return;
-
-        using var dlg = new FolderBrowserDialog
-        {
-            Description          = $"{selected.Count}개 파일을 이동할 폴더를 선택하세요",
-            UseDescriptionForTitle = true,
-        };
+        var selected = GetSelectedResults().ToList(); if (selected.Count == 0) return;
+        using var dlg = new FolderBrowserDialog { Description = $"{selected.Count}개 파일을 이동할 폴더", UseDescriptionForTitle = true };
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
-
-        var dest    = dlg.SelectedPath;
-        var errors  = new List<string>();
+        var dest = dlg.SelectedPath; var errors = new List<string>();
         foreach (var r in selected)
         {
             try
@@ -943,9 +907,7 @@ public partial class MainForm : Form
                 var target = Path.Combine(dest, r.FileName);
                 if (File.Exists(target))
                 {
-                    var ans = MessageBox.Show(
-                        $"'{r.FileName}' 이(가) 이미 존재합니다. 덮어쓸까요?",
-                        "이동 확인", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                    var ans = MessageBox.Show($"'{r.FileName}' 이(가) 이미 존재합니다. 덮어쓸까요?", "이동 확인", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
                     if (ans == DialogResult.Cancel) break;
                     if (ans == DialogResult.No) continue;
                 }
@@ -954,256 +916,132 @@ public partial class MainForm : Form
             }
             catch (Exception ex) { errors.Add($"{r.FileName}: {ex.Message}"); }
         }
-
-        if (errors.Count > 0)
-            MessageBox.Show("다음 파일을 이동하지 못했습니다:\n\n" + string.Join('\n', errors.Take(10)),
-                "이동 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-
+        if (errors.Count > 0) MessageBox.Show("이동 실패:\n" + string.Join('\n', errors.Take(10)), "이동 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         _ = RunSearchAsync();
     }
 
     private void DeleteSelectedFiles()
     {
-        var selected = GetSelectedResults().ToList();
-        if (selected.Count == 0) return;
-
-        var msg = selected.Count == 1
-            ? $"'{selected[0].FileName}'\n파일을 휴지통으로 이동할까요?"
-            : $"{selected.Count}개 파일을 휴지통으로 이동할까요?";
-
-        if (MessageBox.Show(msg, "파일 삭제", MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question) != DialogResult.Yes) return;
-
+        var selected = GetSelectedResults().ToList(); if (selected.Count == 0) return;
+        var msg = selected.Count == 1 ? $"'{selected[0].FileName}'\n파일을 휴지통으로 이동할까요?" : $"{selected.Count}개 파일을 휴지통으로 이동할까요?";
+        if (MessageBox.Show(msg, "파일 삭제", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
         var errors = new List<string>();
         foreach (var r in selected)
         {
-            try
-            {
-                RecycleFile(r.FilePath);
-                _indexer.RemoveFile(r.FilePath);
-            }
+            try { RecycleFile(r.FilePath); _indexer.RemoveFile(r.FilePath); }
             catch (Exception ex) { errors.Add($"{r.FileName}: {ex.Message}"); }
         }
-
-        if (errors.Count > 0)
-            MessageBox.Show("다음 파일을 삭제하지 못했습니다:\n\n" + string.Join('\n', errors.Take(10)),
-                "삭제 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-
+        if (errors.Count > 0) MessageBox.Show("삭제 실패:\n" + string.Join('\n', errors.Take(10)), "삭제 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         _ = RunSearchAsync();
     }
 
-    /// <summary>파일을 휴지통으로 보낸다 (Shell32 SHFileOperation 사용).</summary>
     private static void RecycleFile(string path)
     {
-        var op = new NativeShFileOp
-        {
-            wFunc  = 3,                   // FO_DELETE
-            pFrom  = path + '\0' + '\0',  // double-null 종료
-            fFlags = (short)(0x0040       // FOF_ALLOWUNDO  → 휴지통
-                           | 0x0010       // FOF_NOCONFIRMATION
-                           | 0x0400),     // FOF_NOERRORUI
-        };
+        var op = new NativeShFileOp { wFunc = 3, pFrom = path + '\0' + '\0', fFlags = (short)(0x0040 | 0x0010 | 0x0400) };
         NativeMethods.SHFileOperation(ref op);
     }
 
     private void ShowProperties()
     {
-        var r = GetSelectedResult();
-        if (r is null) return;
-        try
-        {
-            Process.Start(new ProcessStartInfo(r.FilePath)
-            {
-                Verb           = "properties",
-                UseShellExecute = true,
-            });
-        }
+        var r = GetSelectedResult(); if (r is null) return;
+        try { Process.Start(new ProcessStartInfo(r.FilePath) { Verb = "properties", UseShellExecute = true }); }
         catch
         {
-            // fallback: 간단한 정보 표시
             var fi = new FileInfo(r.FilePath);
-            MessageBox.Show(
-                $"이름:     {fi.Name}\n" +
-                $"경로:     {fi.DirectoryName}\n" +
-                $"크기:     {FormatSize(fi.Length)}\n" +
-                $"만든 날짜: {fi.CreationTime:yyyy-MM-dd HH:mm:ss}\n" +
-                $"수정 날짜: {fi.LastWriteTime:yyyy-MM-dd HH:mm:ss}\n" +
-                $"특성:     {fi.Attributes}",
-                "파일 속성", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show($"이름: {fi.Name}\n경로: {fi.DirectoryName}\n크기: {FormatSize(fi.Length)}\n수정: {fi.LastWriteTime:yyyy-MM-dd HH:mm:ss}", "파일 속성", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 
-    // ─────────────────────────────────────────────────────────
-    // 선택 조작
-    // ─────────────────────────────────────────────────────────
     private void SelectAll()
     {
         if (_results.Count == 0) return;
         listResults.BeginUpdate();
-        for (int i = 0; i < _results.Count; i++)
-            listResults.SelectedIndices.Add(i);
+        for (int i = 0; i < _results.Count; i++) listResults.SelectedIndices.Add(i);
         listResults.EndUpdate();
     }
 
     private void InvertSelection()
     {
         if (_results.Count == 0) return;
-        var selected = new HashSet<int>(listResults.SelectedIndices.Cast<int>());
+        var sel = new HashSet<int>(listResults.SelectedIndices.Cast<int>());
         listResults.BeginUpdate();
         listResults.SelectedIndices.Clear();
-        for (int i = 0; i < _results.Count; i++)
-            if (!selected.Contains(i))
-                listResults.SelectedIndices.Add(i);
+        for (int i = 0; i < _results.Count; i++) if (!sel.Contains(i)) listResults.SelectedIndices.Add(i);
         listResults.EndUpdate();
     }
 
-    // ─────────────────────────────────────────────────────────
-    // 클립보드 복사
-    // ─────────────────────────────────────────────────────────
-    private void CopySelectedPaths()
-    {
-        var text = string.Join(Environment.NewLine,
-            GetSelectedResults().Select(r => r.FilePath));
-        if (!string.IsNullOrEmpty(text))
-            try { Clipboard.SetText(text); } catch { }
-    }
+    private void CopySelectedPaths() { var t = string.Join(Environment.NewLine, GetSelectedResults().Select(r => r.FilePath)); if (!string.IsNullOrEmpty(t)) try { Clipboard.SetText(t); } catch { } }
+    private void CopySelectedDirs()  { var t = string.Join(Environment.NewLine, GetSelectedResults().Select(r => Path.GetDirectoryName(r.FilePath) ?? r.FilePath).Distinct()); if (!string.IsNullOrEmpty(t)) try { Clipboard.SetText(t); } catch { } }
+    private void CopySelectedNames() { var t = string.Join(Environment.NewLine, GetSelectedResults().Select(r => r.FileName)); if (!string.IsNullOrEmpty(t)) try { Clipboard.SetText(t); } catch { } }
 
-    private void CopySelectedDirs()
-    {
-        var text = string.Join(Environment.NewLine,
-            GetSelectedResults()
-                .Select(r => Path.GetDirectoryName(r.FilePath) ?? r.FilePath)
-                .Distinct());
-        if (!string.IsNullOrEmpty(text))
-            try { Clipboard.SetText(text); } catch { }
-    }
-
-    private void CopySelectedNames()
-    {
-        var text = string.Join(Environment.NewLine,
-            GetSelectedResults().Select(r => r.FileName));
-        if (!string.IsNullOrEmpty(text))
-            try { Clipboard.SetText(text); } catch { }
-    }
-
-    // ─────────────────────────────────────────────────────────
-    // 텍스트 파일로 저장
-    // ─────────────────────────────────────────────────────────
     private void SaveResultsAsText()
     {
         if (_results.Count == 0) return;
-
-        using var dlg = new SaveFileDialog
-        {
-            Title      = "결과를 텍스트 파일로 저장",
-            Filter     = "텍스트 파일 (*.txt)|*.txt|모든 파일 (*.*)|*.*",
-            FileName   = $"SFM_결과_{DateTime.Now:yyyyMMdd_HHmmss}.txt",
-            DefaultExt = "txt",
-        };
+        using var dlg = new SaveFileDialog { Title = "결과를 텍스트로 저장", Filter = "텍스트 (*.txt)|*.txt|*.*|*.*", FileName = $"SFM_결과_{DateTime.Now:yyyyMMdd_HHmmss}.txt" };
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
-
         try
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"SFM 검색 결과 — \"{txtSearch.Text.Trim()}\"");
-            sb.AppendLine($"저장 시각: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-            sb.AppendLine($"총 {_results.Count:N0}개 파일");
-            sb.AppendLine(new string('─', 80));
-            foreach (var r in _results)
-            {
-                sb.AppendLine(r.FilePath);
-                sb.AppendLine($"  크기: {FormatSize(r.FileSize)}  수정: {r.ModifiedAt.ToLocalTime():yyyy-MM-dd HH:mm}  유형: {FormatFileType(r.Extension)}");
-            }
+            sb.AppendLine($"SFM 검색 결과 — \"{txtSearch.Text.Trim()}\"  ({DateTime.Now:yyyy-MM-dd HH:mm:ss})");
+            sb.AppendLine($"총 {_results.Count:N0}개"); sb.AppendLine(new string('─', 80));
+            foreach (var r in _results) sb.AppendLine($"{r.FilePath}  [{FormatSize(r.FileSize)}  {r.ModifiedAt.ToLocalTime():yyyy-MM-dd HH:mm}]");
             File.WriteAllText(dlg.FileName, sb.ToString(), System.Text.Encoding.UTF8);
             sslResultCount.Text = $"저장 완료: {dlg.FileName}";
         }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"저장 실패: {ex.Message}", "SFM",
-                MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
+        catch (Exception ex) { MessageBox.Show($"저장 실패: {ex.Message}", "SFM", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     }
 
-    // ─────────────────────────────────────────────────────────
-    // 인덱스에서 제거
-    // ─────────────────────────────────────────────────────────
     private void OnDeleteFromIndex(object? sender, EventArgs e)
     {
-        var selected = GetSelectedResults().ToList();
-        if (selected.Count == 0) return;
-
-        var msg = selected.Count == 1
-            ? $"'{selected[0].FileName}'\n인덱스에서 제거하시겠습니까?"
-            : $"{selected.Count}개 항목을 인덱스에서 제거하시겠습니까?";
-
-        if (MessageBox.Show(msg, "SFM", MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question) != DialogResult.Yes) return;
-
-        foreach (var r in selected)
-            try { _indexer.RemoveFile(r.FilePath); } catch { }
-
+        var selected = GetSelectedResults().ToList(); if (selected.Count == 0) return;
+        var msg = selected.Count == 1 ? $"'{selected[0].FileName}'\n인덱스에서 제거하시겠습니까?" : $"{selected.Count}개 항목을 인덱스에서 제거하시겠습니까?";
+        if (MessageBox.Show(msg, "SFM", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        foreach (var r in selected) try { _indexer.RemoveFile(r.FilePath); } catch { }
         _ = RunSearchAsync();
     }
 
     // ─────────────────────────────────────────────────────────
-    // 도구 메뉴 핸들러
+    // 도구 메뉴
     // ─────────────────────────────────────────────────────────
     private void OnSettingsClick(object? sender, EventArgs e)
     {
         using var dlg = new IndexSettingsForm(_indexer, _db, _settings);
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
         chkContent.Checked = _settings.EnableContentSearch;
-        _watcher.StopWatching();
-        _watcher.StartWatching(_settings.IndexRootPaths);
-        PopulateLocationDropdown();
+        _watcher.StopWatching(); _watcher.StartWatching(_settings.IndexRootPaths);
         _ = RunSearchAsync();
     }
-
     private void OnReindexClick(object? sender, EventArgs e)
     {
-        if (MessageBox.Show("전체 재인덱싱을 시작하시겠습니까?\n시간이 걸릴 수 있습니다.",
-                "SFM", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        if (MessageBox.Show("전체 재인덱싱을 시작하시겠습니까?", "SFM", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
         sslIndexStatus.Text = "재인덱싱 준비 중…";
         _ = _indexer.BuildIndexAsync(_settings.IndexRootPaths);
     }
-
-    private void OnBuildContentClick(object? sender, EventArgs e)
-    {
-        sslIndexStatus.Text = "내용 인덱싱 시작…";
-        _ = _indexer.BuildMissingContentAsync();
-    }
-
+    private void OnBuildContentClick(object? sender, EventArgs e) { sslIndexStatus.Text = "내용 인덱싱 시작…"; _ = _indexer.BuildMissingContentAsync(); }
     private void OnVacuumClick(object? sender, EventArgs e)
     {
         sslIndexStatus.Text = "DB 최적화 중…";
         Task.Run(() =>
         {
-            try
-            {
-                _db.Vacuum();
-                Invoke(() => { sslIndexStatus.Text = "DB 최적화 완료"; RefreshDbStats(); });
-            }
+            try { _db.Vacuum(); Invoke(() => { sslIndexStatus.Text = "DB 최적화 완료"; RefreshDbStats(); }); }
             catch (Exception ex) { Invoke(() => sslIndexStatus.Text = $"최적화 실패: {ex.Message}"); }
         });
     }
 
     // ─────────────────────────────────────────────────────────
-    // DB 통계 갱신
+    // DB 통계
     // ─────────────────────────────────────────────────────────
     private void RefreshDbStats()
     {
         try
         {
-            var stats = _db.GetIndexStats();
-            lblDbInfo.Text  = $"인덱스: {stats.TotalFiles:N0}개 파일  ·  {stats.DatabaseSizeMb:F1} MB";
-            sslDbStats.Text = $"인덱스: {stats.TotalFiles:N0}개 파일 ({stats.DatabaseSizeMb:F1} MB)";
+            var s = _db.GetIndexStats();
+            lblDbInfo.Text  = $"인덱스: {s.TotalFiles:N0}개 파일  ·  {s.DatabaseSizeMb:F1} MB";
+            sslDbStats.Text = $"인덱스: {s.TotalFiles:N0}개 파일 ({s.DatabaseSizeMb:F1} MB)";
         }
-        catch { /* ignore */ }
+        catch { }
     }
 
-    // ─────────────────────────────────────────────────────────
-    // 열 너비 자동 조정
-    // ─────────────────────────────────────────────────────────
     private void AutoResizeColumns()
     {
         if (_results.Count == 0) return;
@@ -1224,34 +1062,19 @@ public partial class MainForm : Form
 
     private static string FormatFileType(string? ext) => ext?.ToLowerInvariant() switch
     {
-        ".docx" or ".doc" => "Word 문서",
-        ".xlsx" or ".xls" => "Excel",
-        ".pptx" or ".ppt" => "PowerPoint",
-        ".pdf"            => "PDF",
-        ".txt"            => "텍스트",
-        ".md"             => "Markdown",
-        ".rtf"            => "서식 있는 텍스트",
-        ".jpg" or ".jpeg" => "JPEG 이미지",
-        ".png"            => "PNG 이미지",
-        ".gif"            => "GIF",
-        ".bmp"            => "비트맵",
-        ".svg"            => "SVG",
-        ".cs"             => "C# 소스",
-        ".py"             => "Python",
-        ".js"             => "JavaScript",
-        ".ts"             => "TypeScript",
-        ".html" or ".htm" => "HTML",
-        ".css"            => "CSS",
-        ".sql"            => "SQL",
-        ".json"           => "JSON",
-        ".xml"            => "XML",
-        ".zip"            => "ZIP 압축",
-        ".rar"            => "RAR 압축",
-        ".7z"             => "7-Zip",
-        ".exe"            => "실행 파일",
-        ".lnk"            => "바로 가기",
-        null or ""        => "파일",
-        var e             => $"{e.TrimStart('.').ToUpperInvariant()} 파일",
+        ".docx" or ".doc" => "Word 문서",  ".xlsx" or ".xls" => "Excel",
+        ".pptx" or ".ppt" => "PowerPoint", ".pdf" => "PDF",
+        ".txt" => "텍스트",               ".md"  => "Markdown",
+        ".jpg" or ".jpeg" => "JPEG 이미지", ".png" => "PNG 이미지",
+        ".gif" => "GIF",                  ".bmp" => "비트맵",
+        ".cs"  => "C# 소스",              ".py"  => "Python",
+        ".js"  => "JavaScript",           ".ts"  => "TypeScript",
+        ".html" or ".htm" => "HTML",      ".css" => "CSS",
+        ".sql" => "SQL",                  ".json" => "JSON",
+        ".xml" => "XML",                  ".zip" => "ZIP",
+        ".exe" => "실행 파일",            ".lnk" => "바로 가기",
+        null or "" => "파일",
+        var e => $"{e.TrimStart('.').ToUpperInvariant()} 파일",
     };
 
     // ─────────────────────────────────────────────────────────
@@ -1259,27 +1082,13 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
-        _debounceTimer.Stop();
-        _debounceTimer.Dispose();
-        _watcher.Dispose();
-        _db.Dispose();
-
+        _debounceTimer.Stop(); _debounceTimer.Dispose();
+        _watcher.Dispose(); _db.Dispose();
         _settings.WindowMaximized = (WindowState == FormWindowState.Maximized);
         if (WindowState == FormWindowState.Normal)
-        {
-            _settings.WindowX      = Location.X;
-            _settings.WindowY      = Location.Y;
-            _settings.WindowWidth  = Size.Width;
-            _settings.WindowHeight = Size.Height;
-        }
+        { _settings.WindowX = Location.X; _settings.WindowY = Location.Y; _settings.WindowWidth = Size.Width; _settings.WindowHeight = Size.Height; }
         else
-        {
-            var rb = RestoreBounds;
-            _settings.WindowX      = rb.X;
-            _settings.WindowY      = rb.Y;
-            _settings.WindowWidth  = rb.Width;
-            _settings.WindowHeight = rb.Height;
-        }
+        { var rb = RestoreBounds; _settings.WindowX = rb.X; _settings.WindowY = rb.Y; _settings.WindowWidth = rb.Width; _settings.WindowHeight = rb.Height; }
         _settings.Save();
         base.OnFormClosed(e);
     }
