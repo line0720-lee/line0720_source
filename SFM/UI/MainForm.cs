@@ -114,6 +114,12 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     private void RestoreWindowBounds()
     {
+        if (_settings.WindowMaximized)
+        {
+            WindowState = FormWindowState.Maximized;
+            return;
+        }
+
         if (_settings.WindowX >= 0 && _settings.WindowY >= 0)
         {
             StartPosition = FormStartPosition.Manual;
@@ -981,10 +987,23 @@ public partial class MainForm : Form
         _watcher.Dispose();
         _db.Dispose();
 
-        _settings.WindowX      = Location.X;
-        _settings.WindowY      = Location.Y;
-        _settings.WindowWidth  = Size.Width;
-        _settings.WindowHeight = Size.Height;
+        _settings.WindowMaximized = (WindowState == FormWindowState.Maximized);
+        if (WindowState == FormWindowState.Normal)
+        {
+            // 최대화 상태에서는 RestoreBounds로 원래 크기 저장
+            _settings.WindowX      = Location.X;
+            _settings.WindowY      = Location.Y;
+            _settings.WindowWidth  = Size.Width;
+            _settings.WindowHeight = Size.Height;
+        }
+        else
+        {
+            var rb = RestoreBounds;
+            _settings.WindowX      = rb.X;
+            _settings.WindowY      = rb.Y;
+            _settings.WindowWidth  = rb.Width;
+            _settings.WindowHeight = rb.Height;
+        }
         _settings.Save();
 
         base.OnFormClosed(e);

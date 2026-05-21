@@ -34,6 +34,9 @@ public class AppSettings
     public int WindowX { get; set; } = -1;
     public int WindowY { get; set; } = -1;
 
+    /// <summary>true: 최대화 상태로 시작. 기본값 true.</summary>
+    public bool WindowMaximized { get; set; } = true;
+
     /// <summary>기본값은 Windows 레지스트리 테마에서 자동 감지.</summary>
     public bool IsDarkMode { get; set; } = DetectSystemDarkMode();
 
@@ -106,6 +109,7 @@ public class AppSettings
         WindowHeight         = 680;
         WindowX              = -1;
         WindowY              = -1;
+        WindowMaximized      = true;
         IsDarkMode           = DetectSystemDarkMode();
         ShowSnippetInResult  = true;
     }
