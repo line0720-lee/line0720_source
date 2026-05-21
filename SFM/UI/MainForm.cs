@@ -37,7 +37,6 @@ public partial class MainForm : Form
 
     // 트리 상태
     private const string TreePlaceholder = "\0placeholder";
-    // private int _treeSavedWidth = 220;   // 패널 토글 시 너비 복원용 (예약)
     private bool _treeCheckSuppressed = false;   // 프로그래밍 체크 시 이벤트 억제
 
     // ─────────────────────────────────────────────────────────
@@ -101,6 +100,11 @@ public partial class MainForm : Form
         InitImageList();
         InitPagination();
         InitFolderTree();
+
+        // ── 이벤트 연결 전에 초기 UI 상태를 설정 (CheckedChanged 이벤트 오발 방지) ──
+        chkContent.Checked         = _settings.EnableContentSearch;
+        tsmiSearchContent.Checked  = _settings.EnableContentSearch;
+
         WireEvents();
         ApplyTheme();
         RestoreWindowBounds();
