@@ -27,8 +27,6 @@ partial class MainForm
         tsmiViewAutoCol     = new ToolStripMenuItem();
         tsmiSearch          = new ToolStripMenuItem();
         tsmiSearchContent   = new ToolStripMenuItem();
-        tsmiSearchCase      = new ToolStripMenuItem();
-        tsmiSearchWhole     = new ToolStripMenuItem();
         tsmiSearchSep1      = new ToolStripSeparator();
         tsmiSearchClear     = new ToolStripMenuItem();
         tsmiTools           = new ToolStripMenuItem();
@@ -51,11 +49,13 @@ partial class MainForm
 
         // ── 옵션 패널 ─────────────────────────────────────────────
         pnlOptions          = new Panel();
-        lblFilter           = new Label();
-        cmbFilter           = new ComboBox();
         chkContent          = new CheckBox();
-        chkCase             = new CheckBox();
-        chkWholeWord        = new CheckBox();
+        lblTypeSep          = new Label();
+        lblFilter           = new Label();
+        chkTypeDoc          = new CheckBox();
+        chkTypePdf          = new CheckBox();
+        chkTypeImage        = new CheckBox();
+        chkTypeCode         = new CheckBox();
         lblDbInfo           = new Label();
 
         // ── 스니펫 패널 ───────────────────────────────────────────
@@ -114,6 +114,8 @@ partial class MainForm
         statusStrip.SuspendLayout();
         SuspendLayout();
 
+        // tsmiSearchCase, tsmiSearchWhole 제거됨 — 선언부 포함
+
         // ═════════════════════════════════════════════════════════
         // MenuStrip
         // ═════════════════════════════════════════════════════════
@@ -162,7 +164,7 @@ partial class MainForm
 
         // ── 검색 메뉴 ─────────────────────────────────────────────
         tsmiSearch.DropDownItems.AddRange([
-            tsmiSearchContent, tsmiSearchCase, tsmiSearchWhole,
+            tsmiSearchContent,
             tsmiSearchSep1, tsmiSearchClear]);
         tsmiSearch.Name = "tsmiSearch";
         tsmiSearch.Text = "검색(&S)";
@@ -171,14 +173,6 @@ partial class MainForm
         tsmiSearchContent.Text         = "파일 내용 검색(&C)";
         tsmiSearchContent.CheckOnClick = true;
         tsmiSearchContent.ShortcutKeys = Keys.F4;
-
-        tsmiSearchCase.Name         = "tsmiSearchCase";
-        tsmiSearchCase.Text         = "대소문자 구분(&K)";
-        tsmiSearchCase.CheckOnClick = true;
-
-        tsmiSearchWhole.Name         = "tsmiSearchWhole";
-        tsmiSearchWhole.Text         = "전체 단어(&W)";
-        tsmiSearchWhole.CheckOnClick = true;
 
         tsmiSearchSep1.Name = "tsmiSearchSep1";
 
@@ -290,48 +284,67 @@ partial class MainForm
         // ═════════════════════════════════════════════════════════
         // 옵션 패널 (pnlOptions)
         // ═════════════════════════════════════════════════════════
+
+        // 내용 검색 체크박스
+        chkContent.AutoSize  = true;
+        chkContent.Location  = new Point(6, 5);
+        chkContent.Name      = "chkContent";
+        chkContent.Text      = "내용 검색 (F4)";
+        chkContent.TabIndex  = 4;
+
+        // 구분선 레이블
+        lblTypeSep.AutoSize  = false;
+        lblTypeSep.Location  = new Point(116, 3);
+        lblTypeSep.Size      = new Size(2, 20);
+        lblTypeSep.Name      = "lblTypeSep";
+        lblTypeSep.Text      = string.Empty;
+        lblTypeSep.BorderStyle = BorderStyle.Fixed3D;
+
+        // 유형: 레이블
         lblFilter.AutoSize  = true;
-        lblFilter.Location  = new Point(4, 6);
+        lblFilter.Location  = new Point(124, 6);
         lblFilter.Name      = "lblFilter";
         lblFilter.Text      = "유형:";
 
-        cmbFilter.DropDownStyle = ComboBoxStyle.DropDownList;
-        cmbFilter.Items.AddRange(["전체", "문서", "PDF", "이미지", "소스코드"]);
-        cmbFilter.Location      = new Point(38, 3);
-        cmbFilter.Name          = "cmbFilter";
-        cmbFilter.SelectedIndex = 0;
-        cmbFilter.Size          = new Size(90, 23);
-        cmbFilter.TabIndex      = 4;
-        cmbFilter.FlatStyle     = FlatStyle.Popup;
+        // 유형 체크박스들
+        chkTypeDoc.AutoSize  = true;
+        chkTypeDoc.Location  = new Point(160, 5);
+        chkTypeDoc.Name      = "chkTypeDoc";
+        chkTypeDoc.Text      = "문서";
+        chkTypeDoc.TabIndex  = 5;
 
-        chkContent.AutoSize  = true;
-        chkContent.Location  = new Point(140, 5);
-        chkContent.Name      = "chkContent";
-        chkContent.Text      = "내용 검색 (F4)";
-        chkContent.TabIndex  = 5;
+        chkTypePdf.AutoSize  = true;
+        chkTypePdf.Location  = new Point(205, 5);
+        chkTypePdf.Name      = "chkTypePdf";
+        chkTypePdf.Text      = "PDF";
+        chkTypePdf.TabIndex  = 6;
 
-        chkCase.AutoSize  = true;
-        chkCase.Location  = new Point(255, 5);
-        chkCase.Name      = "chkCase";
-        chkCase.Text      = "대소문자";
-        chkCase.TabIndex  = 6;
+        chkTypeImage.AutoSize  = true;
+        chkTypeImage.Location  = new Point(248, 5);
+        chkTypeImage.Name      = "chkTypeImage";
+        chkTypeImage.Text      = "이미지";
+        chkTypeImage.TabIndex  = 7;
 
-        chkWholeWord.AutoSize  = true;
-        chkWholeWord.Location  = new Point(342, 5);
-        chkWholeWord.Name      = "chkWholeWord";
-        chkWholeWord.Text      = "전체 단어";
-        chkWholeWord.TabIndex  = 7;
+        chkTypeCode.AutoSize  = true;
+        chkTypeCode.Location  = new Point(300, 5);
+        chkTypeCode.Name      = "chkTypeCode";
+        chkTypeCode.Text      = "소스코드";
+        chkTypeCode.TabIndex  = 8;
 
-        lblDbInfo.AutoSize   = false;
-        lblDbInfo.Anchor     = AnchorStyles.Top | AnchorStyles.Right;
-        lblDbInfo.TextAlign  = ContentAlignment.MiddleRight;
-        lblDbInfo.Location   = new Point(700, 4);
-        lblDbInfo.Size       = new Size(310, 20);
-        lblDbInfo.Name       = "lblDbInfo";
-        lblDbInfo.Text       = string.Empty;
-        lblDbInfo.ForeColor  = SystemColors.GrayText;
+        // DB 정보 (우측 정렬)
+        lblDbInfo.AutoSize  = false;
+        lblDbInfo.Anchor    = AnchorStyles.Top | AnchorStyles.Right;
+        lblDbInfo.TextAlign = ContentAlignment.MiddleRight;
+        lblDbInfo.Location  = new Point(700, 4);
+        lblDbInfo.Size      = new Size(310, 20);
+        lblDbInfo.Name      = "lblDbInfo";
+        lblDbInfo.Text      = string.Empty;
+        lblDbInfo.ForeColor = SystemColors.GrayText;
 
-        pnlOptions.Controls.AddRange([lblFilter, cmbFilter, chkContent, chkCase, chkWholeWord, lblDbInfo]);
+        pnlOptions.Controls.AddRange([
+            chkContent, lblTypeSep, lblFilter,
+            chkTypeDoc, chkTypePdf, chkTypeImage, chkTypeCode,
+            lblDbInfo]);
         pnlOptions.Dock   = DockStyle.Bottom;
         pnlOptions.Height = 28;
         pnlOptions.Name   = "pnlOptions";
@@ -576,8 +589,6 @@ partial class MainForm
     private ToolStripMenuItem    tsmiViewAutoCol     = null!;
     private ToolStripMenuItem    tsmiSearch          = null!;
     private ToolStripMenuItem    tsmiSearchContent   = null!;
-    private ToolStripMenuItem    tsmiSearchCase      = null!;
-    private ToolStripMenuItem    tsmiSearchWhole     = null!;
     private ToolStripSeparator   tsmiSearchSep1      = null!;
     private ToolStripMenuItem    tsmiSearchClear     = null!;
     private ToolStripMenuItem    tsmiTools           = null!;
@@ -598,11 +609,13 @@ partial class MainForm
     private Button               btnSearch           = null!;
 
     private Panel                pnlOptions          = null!;
-    private Label                lblFilter           = null!;
-    private ComboBox             cmbFilter           = null!;
     private CheckBox             chkContent          = null!;
-    private CheckBox             chkCase             = null!;
-    private CheckBox             chkWholeWord        = null!;
+    private Label                lblTypeSep          = null!;
+    private Label                lblFilter           = null!;
+    private CheckBox             chkTypeDoc          = null!;
+    private CheckBox             chkTypePdf          = null!;
+    private CheckBox             chkTypeImage        = null!;
+    private CheckBox             chkTypeCode         = null!;
     private Label                lblDbInfo           = null!;
 
     private Panel                pnlSnippet          = null!;

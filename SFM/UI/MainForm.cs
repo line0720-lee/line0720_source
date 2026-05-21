@@ -39,18 +39,25 @@ public partial class MainForm : Form
     private readonly string[] _colHeaders = ["이름", "경로", "파일 크기", "수정 날짜", "유형"];
 
     // ─────────────────────────────────────────────────────────
-    // 파일유형 필터
+    // 파일유형 필터 (체크박스 멀티 선택)
     // ─────────────────────────────────────────────────────────
-    private static readonly string[][] FilterExtensions =
-    [
-        [],
-        [".docx",".doc",".xlsx",".xls",".pptx",".ppt",".txt",".md",".rtf"],
-        [".pdf"],
-        [".jpg",".jpeg",".png",".gif",".bmp",".svg",".webp",".ico"],
-        [".cs",".py",".js",".ts",".java",".cpp",".c",".h",
-         ".go",".rs",".rb",".php",".swift",".kt",
-         ".html",".htm",".css",".scss",".sql",".sh",".bat",".ps1"],
-    ];
+    private static readonly string[] ExtDoc   = [".docx",".doc",".xlsx",".xls",".pptx",".ppt",".txt",".md",".rtf"];
+    private static readonly string[] ExtPdf   = [".pdf"];
+    private static readonly string[] ExtImage = [".jpg",".jpeg",".png",".gif",".bmp",".svg",".webp",".ico"];
+    private static readonly string[] ExtCode  = [".cs",".py",".js",".ts",".java",".cpp",".c",".h",
+                                                  ".go",".rs",".rb",".php",".swift",".kt",
+                                                  ".html",".htm",".css",".scss",".sql",".sh",".bat",".ps1"];
+
+    /// <summary>현재 체크된 유형 체크박스에서 확장자 배열을 반환한다. 아무것도 없으면 빈 배열(=전체).</summary>
+    private string[] GetSelectedExtensions()
+    {
+        var list = new List<string>();
+        if (chkTypeDoc.Checked)   list.AddRange(ExtDoc);
+        if (chkTypePdf.Checked)   list.AddRange(ExtPdf);
+        if (chkTypeImage.Checked) list.AddRange(ExtImage);
+        if (chkTypeCode.Checked)  list.AddRange(ExtCode);
+        return list.ToArray();  // 빈 배열 = 전체 허용
+    }
 
     // ─────────────────────────────────────────────────────────
     // 파일 아이콘
@@ -223,11 +230,13 @@ public partial class MainForm : Form
             tsmiSearchContent.Checked     = chkContent.Checked;
             _ = RunSearchAsync();
         };
-        chkCase.CheckedChanged      += (_, _) => _ = RunSearchAsync();
-        chkWholeWord.CheckedChanged += (_, _) => _ = RunSearchAsync();
 
-        // ── 파일유형 필터 ────────────────────────────────────
-        cmbFilter.SelectedIndexChanged += (_, _) => _ = RunSearchAsync();
+        // ── 유형 체크박스 (멀티 선택) ─────────────────────────
+        EventHandler typeChanged = (_, _) => _ = RunSearchAsync();
+        chkTypeDoc.CheckedChanged   += typeChanged;
+        chkTypePdf.CheckedChanged   += typeChanged;
+        chkTypeImage.CheckedChanged += typeChanged;
+        chkTypeCode.CheckedChanged  += typeChanged;
 
         // ── ListView ─────────────────────────────────────────
         listResults.RetrieveVirtualItem  += OnRetrieveVirtualItem;
@@ -296,8 +305,6 @@ public partial class MainForm : Form
 
         // ── 메뉴: 검색 ───────────────────────────────────────
         tsmiSearchContent.Click += (_, _) => chkContent.Checked = tsmiSearchContent.Checked;
-        tsmiSearchCase.Click    += (_, _) => chkCase.Checked    = tsmiSearchCase.Checked;
-        tsmiSearchWhole.Click   += (_, _) => chkWholeWord.Checked = tsmiSearchWhole.Checked;
         tsmiSearchClear.Click   += (_, _) => { txtSearch.Clear(); txtSearch.Focus(); };
 
         // ── 메뉴: 도구 ───────────────────────────────────────
@@ -384,13 +391,13 @@ public partial class MainForm : Form
         btnSearch.BackColor = Color.FromArgb(0, 100, 180);
         btnSearch.ForeColor = Color.White;
 
-        cmbFilter.BackColor   = surf;
-        cmbFilter.ForeColor   = text;
-        chkContent.ForeColor  = text;
-        chkCase.ForeColor     = text;
-        chkWholeWord.ForeColor = text;
-        lblDbInfo.ForeColor   = gray;
-        lblFilter.ForeColor   = text;
+        chkContent.ForeColor   = text;
+        lblFilter.ForeColor    = gray;
+        chkTypeDoc.ForeColor   = text;
+        chkTypePdf.ForeColor   = text;
+        chkTypeImage.ForeColor = text;
+        chkTypeCode.ForeColor  = text;
+        lblDbInfo.ForeColor    = gray;
 
         listResults.BackColor = Color.FromArgb(25, 25, 25);
         listResults.ForeColor = text;
@@ -442,13 +449,13 @@ public partial class MainForm : Form
         btnSearch.BackColor = Color.FromArgb(0, 120, 212);
         btnSearch.ForeColor = Color.White;
 
-        cmbFilter.BackColor  = SystemColors.Window;
-        cmbFilter.ForeColor  = SystemColors.WindowText;
         chkContent.ForeColor   = SystemColors.WindowText;
-        chkCase.ForeColor      = SystemColors.WindowText;
-        chkWholeWord.ForeColor = SystemColors.WindowText;
+        lblFilter.ForeColor    = SystemColors.GrayText;
+        chkTypeDoc.ForeColor   = SystemColors.WindowText;
+        chkTypePdf.ForeColor   = SystemColors.WindowText;
+        chkTypeImage.ForeColor = SystemColors.WindowText;
+        chkTypeCode.ForeColor  = SystemColors.WindowText;
         lblDbInfo.ForeColor    = SystemColors.GrayText;
-        lblFilter.ForeColor    = SystemColors.WindowText;
 
         listResults.BackColor = SystemColors.Window;
         listResults.ForeColor = SystemColors.WindowText;
@@ -609,7 +616,7 @@ public partial class MainForm : Form
     {
         if (string.IsNullOrEmpty(keyword) || string.IsNullOrEmpty(rtbSnippet.Text)) return;
         var text       = rtbSnippet.Text;
-        var comparison = chkCase.Checked ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        var comparison = StringComparison.OrdinalIgnoreCase;
         int start = 0;
         while (true)
         {
@@ -659,13 +666,12 @@ public partial class MainForm : Form
             ResetSortHeaders();
         }
 
-        var filterIdx = Math.Clamp(cmbFilter.SelectedIndex, 0, FilterExtensions.Length - 1);
         var query = new SearchQuery
         {
             Keyword         = keyword,
             MaxResults      = _settings.MaxSearchResults,
             SearchInContent = chkContent.Checked,
-            Extensions      = FilterExtensions[filterIdx],
+            Extensions      = GetSelectedExtensions(),
             Page            = _currentPage,
         };
 
