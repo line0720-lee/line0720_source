@@ -113,11 +113,19 @@ public partial class MainForm : Form
         _watcher.StartWatching(_settings.IndexRootPaths);
         ActiveControl = txtSearch;
 
-        // 폼 크기 확정 후 SplitterDistance 설정 (InitializeComponent 시점에 설정하면 크기 제약 오류)
+        // MinSize / SplitterDistance 는 Load 이벤트에서 폼 크기 확정 후 설정.
+        // EndInit() 시 Width=0 → ApplyPanel2MinSize 내부에서 제약 위반 오류 방지.
         Load += (_, _) =>
         {
-            try { splitMain.SplitterDistance = 220; }
-            catch { /* 폼 너비가 너무 좁은 경우 무시 */ }
+            try
+            {
+                splitMain.Panel1MinSize    = 120;
+                splitMain.Panel2MinSize    = 200;
+                splitMain.SplitterDistance = Math.Clamp(220,
+                    splitMain.Panel1MinSize,
+                    splitMain.Width - splitMain.Panel2MinSize - splitMain.SplitterWidth);
+            }
+            catch { /* 방어적 처리 */ }
         };
     }
 

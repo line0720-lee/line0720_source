@@ -432,9 +432,9 @@ partial class MainForm
         splitMain.FixedPanel       = FixedPanel.Panel1;
         splitMain.Name             = "splitMain";
         splitMain.Orientation      = Orientation.Vertical;
-        splitMain.Panel1MinSize    = 120;
-        splitMain.Panel2MinSize    = 200;
-        // SplitterDistance는 Load 이벤트에서 폼 크기 확정 후 설정
+        // Panel1MinSize / Panel2MinSize / SplitterDistance 는 Load 이벤트에서 설정.
+        // InitializeComponent 시점에 Width=0 이므로 EndInit() 내부에서
+        // ApplyPanel2MinSize → set_SplitterDistance 가 호출될 때 제약 위반 오류 발생.
         splitMain.SplitterWidth    = 5;
         splitMain.TabIndex         = 1;
 
