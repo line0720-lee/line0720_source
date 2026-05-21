@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.RegularExpressions;
 using SFM.Core;
 using SFM.Data;
@@ -20,9 +21,9 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     // UI 상태
     // ─────────────────────────────────────────────────────────
-    private List<SearchResult> _results      = [];
-    private int                _currentPage  = 0;
-    private string             _lastKeyword  = string.Empty;
+    private List<SearchResult> _results     = [];
+    private int                _currentPage = 0;
+    private string             _lastKeyword = string.Empty;
 
     private ToolStripButton _sslPrevPage = null!;
     private ToolStripButton _sslNextPage = null!;
@@ -31,11 +32,11 @@ public partial class MainForm : Form
     private readonly ListBox                    _recentBox;
 
     // ── 컬럼 정렬 상태 ────────────────────────────────────────
-    private int  _sortColumn    = -1;       // 마지막 정렬 컬럼 인덱스
+    private int  _sortColumn    = -1;
     private bool _sortAscending = true;
 
-    // ── 컬럼 헤더 원본 텍스트 (정렬 화살표 토글용) ────────────
-    private readonly string[] _colHeaders = ["파일명", "경로", "크기", "수정일", "일치"];
+    // ── 컬럼 헤더 원본 텍스트 (정렬 화살표 토글용) ─────────────
+    private readonly string[] _colHeaders = ["이름", "경로", "파일 크기", "수정 날짜", "유형"];
 
     // ─────────────────────────────────────────────────────────
     // 파일유형 필터
@@ -84,8 +85,8 @@ public partial class MainForm : Form
 
         _db.Initialize();
 
-        _debounceTimer          = new System.Windows.Forms.Timer { Interval = 250 };
-        _debounceTimer.Tick    += OnDebounceTimerTick;
+        _debounceTimer       = new System.Windows.Forms.Timer { Interval = 300 };
+        _debounceTimer.Tick += OnDebounceTimerTick;
 
         _recentBox = new ListBox
         {
@@ -100,6 +101,7 @@ public partial class MainForm : Form
 
         InitImageList();
         InitPagination();
+        PopulateLocationDropdown();
         WireEvents();
         ApplyTheme();
         RestoreWindowBounds();
@@ -119,7 +121,6 @@ public partial class MainForm : Form
             WindowState = FormWindowState.Maximized;
             return;
         }
-
         if (_settings.WindowX >= 0 && _settings.WindowY >= 0)
         {
             StartPosition = FormStartPosition.Manual;
@@ -127,6 +128,27 @@ public partial class MainForm : Form
         }
         Size = new Size(_settings.WindowWidth, _settings.WindowHeight);
     }
+
+    // ─────────────────────────────────────────────────────────
+    // 위치 드롭다운 초기화
+    // ─────────────────────────────────────────────────────────
+    private void PopulateLocationDropdown()
+    {
+        cmbLocation.Items.Clear();
+        cmbLocation.Items.Add("모든 위치");
+        foreach (var path in _settings.IndexRootPaths)
+        {
+            // 드라이브 루트면 "C:\" 식으로 간결하게, 아니면 마지막 폴더명
+            var label = IsRootPath(path)
+                ? path.ToUpper()
+                : $"{Path.GetFileName(path.TrimEnd('\\', '/'))} ({path})";
+            cmbLocation.Items.Add(label);
+        }
+        cmbLocation.SelectedIndex = 0;
+    }
+
+    private static bool IsRootPath(string path)
+        => path.Length <= 3 && path.Contains(':');
 
     // ─────────────────────────────────────────────────────────
     // 페이지네이션 초기화
@@ -147,7 +169,6 @@ public partial class MainForm : Form
             ToolTipText = "다음 페이지 (Alt+→)",
             Padding     = new Padding(4, 0, 4, 0),
         };
-
         _sslPrevPage.Click += (_, _) =>
         {
             if (_currentPage > 0) { _currentPage--; _ = RunSearchAsync(); }
@@ -157,7 +178,6 @@ public partial class MainForm : Form
             _currentPage++;
             _ = RunSearchAsync();
         };
-
         statusStrip.Items.AddRange([_sslPrevPage, _sslNextPage]);
     }
 
@@ -166,16 +186,35 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     private void WireEvents()
     {
+        // ── 툴바 ─────────────────────────────────────────────
+        cmbLocation.SelectedIndexChanged += (_, _) =>
+        {
+            if (txtSearch.Text.Trim().Length >= 2) _ = RunSearchAsync();
+        };
+
+        btnSearch.Click += (_, _) =>
+        {
+            _debounceTimer.Stop();
+            _ = RunSearchAsync();
+        };
+
+        btnClear.Click += (_, _) =>
+        {
+            txtSearch.Clear();
+            cmbLocation.SelectedIndex = 0;
+            txtSearch.Focus();
+        };
+
         // ── 검색창 ───────────────────────────────────────────
         txtSearch.TextChanged += (_, _) =>
         {
-            _recentBox.Visible = false;   // 타이핑 시작하면 드롭다운 닫기
+            _recentBox.Visible = false;
             _debounceTimer.Stop();
             _debounceTimer.Start();
         };
-        txtSearch.Enter       += OnSearchBoxEnter;
-        txtSearch.Leave       += OnSearchBoxLeave;
-        txtSearch.KeyDown     += OnSearchBoxKeyDown;
+        txtSearch.Enter   += OnSearchBoxEnter;
+        txtSearch.Leave   += OnSearchBoxLeave;
+        txtSearch.KeyDown += OnSearchBoxKeyDown;
 
         // ── 옵션 체크박스 ────────────────────────────────────
         chkContent.CheckedChanged += (_, _) =>
@@ -184,41 +223,67 @@ public partial class MainForm : Form
             tsmiSearchContent.Checked     = chkContent.Checked;
             _ = RunSearchAsync();
         };
-        chkCase.CheckedChanged  += (_, _) => _ = RunSearchAsync();
+        chkCase.CheckedChanged      += (_, _) => _ = RunSearchAsync();
         chkWholeWord.CheckedChanged += (_, _) => _ = RunSearchAsync();
 
         // ── 파일유형 필터 ────────────────────────────────────
         cmbFilter.SelectedIndexChanged += (_, _) => _ = RunSearchAsync();
 
         // ── ListView ─────────────────────────────────────────
-        listResults.RetrieveVirtualItem    += OnRetrieveVirtualItem;
-        listResults.DoubleClick            += (_, _) => OpenSelectedFile();
-        listResults.KeyDown                += OnListKeyDown;
-        listResults.SelectedIndexChanged   += OnListSelectionChanged;
-        listResults.ColumnClick            += OnColumnClick;
+        listResults.RetrieveVirtualItem  += OnRetrieveVirtualItem;
+        listResults.DoubleClick          += (_, _) => OpenSelectedFile();
+        listResults.KeyDown              += OnListKeyDown;
+        listResults.SelectedIndexChanged += OnListSelectionChanged;
+        listResults.ColumnClick          += OnColumnClick;
 
         // ── ContextMenu ──────────────────────────────────────
-        cmsResult.Opening          += (_, e) => e.Cancel = listResults.SelectedIndices.Count == 0;
-        tsmiOpenFile.Click         += (_, _) => OpenSelectedFile();
-        tsmiOpenFolder.Click       += (_, _) => OpenSelectedFolder();
-        tsmiCopyPath.Click         += (_, _) => CopySelectedPaths();
-        tsmiCopyName.Click         += (_, _) => CopySelectedNames();
-        tsmiDeleteFromIndex.Click  += OnDeleteFromIndex;
+        cmsResult.Opening += (_, e) =>
+        {
+            bool hasSel     = listResults.SelectedIndices.Count > 0;
+            bool hasResults = _results.Count > 0;
+
+            tsmiOpenFile.Enabled       = hasSel;
+            tsmiOpenFolder.Enabled     = hasSel;
+            tsmiMoveFile.Enabled       = hasSel;
+            tsmiDeleteFile.Enabled     = hasSel;
+            tsmiProperties.Enabled     = hasSel;
+            tsmiCopyPath.Enabled       = hasSel;
+            tsmiCopyDir.Enabled        = hasSel;
+            tsmiCopyName.Enabled       = hasSel;
+            tsmiDeleteFromIndex.Enabled = hasSel;
+
+            tsmiSelectAll.Enabled    = hasResults;
+            tsmiSelectNone.Enabled   = hasSel;
+            tsmiInvertSelect.Enabled = hasResults;
+            tsmiSaveAsText.Enabled   = hasResults;
+
+            if (!hasResults) e.Cancel = true;
+        };
+
+        tsmiOpenFile.Click        += (_, _) => OpenSelectedFile();
+        tsmiOpenFolder.Click      += (_, _) => OpenSelectedFolder();
+        tsmiMoveFile.Click        += (_, _) => MoveSelectedFiles();
+        tsmiDeleteFile.Click      += (_, _) => DeleteSelectedFiles();
+        tsmiProperties.Click      += (_, _) => ShowProperties();
+        tsmiSelectAll.Click       += (_, _) => SelectAll();
+        tsmiSelectNone.Click      += (_, _) => listResults.SelectedIndices.Clear();
+        tsmiInvertSelect.Click    += (_, _) => InvertSelection();
+        tsmiCopyPath.Click        += (_, _) => CopySelectedPaths();
+        tsmiCopyDir.Click         += (_, _) => CopySelectedDirs();
+        tsmiCopyName.Click        += (_, _) => CopySelectedNames();
+        tsmiSaveAsText.Click      += (_, _) => SaveResultsAsText();
+        tsmiDeleteFromIndex.Click += OnDeleteFromIndex;
 
         // ── 스니펫 닫기 버튼 ─────────────────────────────────
         btnSnippetClose.Click += (_, _) =>
         {
-            pnlSnippet.Visible          = false;
-            tsmiViewSnippet.Checked     = false;
+            pnlSnippet.Visible      = false;
+            tsmiViewSnippet.Checked = false;
         };
 
         // ── 메뉴: 파일 ───────────────────────────────────────
-        tsmiFileNewWindow.Click += (_, _) =>
-        {
-            var f = new MainForm();
-            f.Show();
-        };
-        tsmiFileExit.Click += (_, _) => Close();
+        tsmiFileNewWindow.Click += (_, _) => new MainForm().Show();
+        tsmiFileExit.Click      += (_, _) => Close();
 
         // ── 메뉴: 보기 ───────────────────────────────────────
         tsmiViewDark.Click += (_, _) =>
@@ -226,30 +291,14 @@ public partial class MainForm : Form
             _settings.IsDarkMode = tsmiViewDark.Checked;
             ApplyTheme();
         };
-        tsmiViewSnippet.Click += (_, _) =>
-        {
-            pnlSnippet.Visible = tsmiViewSnippet.Checked;
-        };
+        tsmiViewSnippet.Click += (_, _) => pnlSnippet.Visible = tsmiViewSnippet.Checked;
         tsmiViewAutoCol.Click += (_, _) => AutoResizeColumns();
 
         // ── 메뉴: 검색 ───────────────────────────────────────
-        tsmiSearchContent.Click += (_, _) =>
-        {
-            chkContent.Checked = tsmiSearchContent.Checked;
-        };
-        tsmiSearchCase.Click += (_, _) =>
-        {
-            chkCase.Checked = tsmiSearchCase.Checked;
-        };
-        tsmiSearchWhole.Click += (_, _) =>
-        {
-            chkWholeWord.Checked = tsmiSearchWhole.Checked;
-        };
-        tsmiSearchClear.Click += (_, _) =>
-        {
-            txtSearch.Clear();
-            txtSearch.Focus();
-        };
+        tsmiSearchContent.Click += (_, _) => chkContent.Checked = tsmiSearchContent.Checked;
+        tsmiSearchCase.Click    += (_, _) => chkCase.Checked    = tsmiSearchCase.Checked;
+        tsmiSearchWhole.Click   += (_, _) => chkWholeWord.Checked = tsmiSearchWhole.Checked;
+        tsmiSearchClear.Click   += (_, _) => { txtSearch.Clear(); txtSearch.Focus(); };
 
         // ── 메뉴: 도구 ───────────────────────────────────────
         tsmiToolsIndex.Click   += OnSettingsClick;
@@ -258,24 +307,20 @@ public partial class MainForm : Form
         tsmiToolsVacuum.Click  += OnVacuumClick;
 
         // ── 메뉴: 도움말 ─────────────────────────────────────
-        tsmiHelpAbout.Click += (_, _) =>
-        {
-            MessageBox.Show(
-                "SFM — Smart File Manager v1.0\n\n" +
-                "로컬 파일 전문 검색 도구\n" +
-                "파일명 + 내용 인덱싱 · 한국어 초성 검색 지원\n\n" +
-                "단축키\n" +
-                "  Ctrl+F    검색창 포커스\n" +
-                "  F4        내용 검색 토글\n" +
-                "  F5        전체 재인덱싱\n" +
-                "  Enter     파일 열기\n" +
-                "  Ctrl+C    경로 복사\n" +
-                "  Alt+←/→  이전/다음 페이지\n" +
-                "  Esc       검색어 지우기",
-                "SFM 정보",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-        };
+        tsmiHelpAbout.Click += (_, _) => MessageBox.Show(
+            "SFM — Smart File Manager v1.0\n\n" +
+            "로컬 파일 전문 검색 도구\n" +
+            "파일명 + 내용 인덱싱 · 한국어 초성 검색 지원\n\n" +
+            "단축키\n" +
+            "  Ctrl+F     검색창 포커스\n" +
+            "  F4         내용 검색 토글\n" +
+            "  F5         전체 재인덱싱\n" +
+            "  Enter      파일 열기 / 검색\n" +
+            "  Ctrl+C     경로 복사\n" +
+            "  Ctrl+A     전체 선택\n" +
+            "  Alt+←/→   이전/다음 페이지\n" +
+            "  Esc        검색어 지우기",
+            "SFM 정보", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
         // ── Indexer 이벤트 ───────────────────────────────────
         _indexer.IndexProgressChanged += p => Invoke(() =>
@@ -287,6 +332,7 @@ public partial class MainForm : Form
             sslIndexStatus.Text = $"완료 {r.TotalIndexed:N0}개  +{r.Added} ~{r.Updated} -{r.Deleted}  {r.Elapsed.TotalSeconds:F1}s";
             sslLastIndexed.Text = $"인덱싱: {DateTime.Now:HH:mm}";
             RefreshDbStats();
+            PopulateLocationDropdown();  // 경로가 바뀌었을 수 있으므로 갱신
             if (!string.IsNullOrWhiteSpace(txtSearch.Text))
                 _ = RunSearchAsync();
         });
@@ -320,20 +366,31 @@ public partial class MainForm : Form
         foreach (ToolStripMenuItem m in menuStrip.Items.OfType<ToolStripMenuItem>())
             m.ForeColor = text;
 
-        pnlSearch.BackColor   = Color.FromArgb(37, 37, 38);
-        pnlOptions.BackColor  = Color.FromArgb(37, 37, 38);
+        pnlSearch.BackColor  = Color.FromArgb(37, 37, 38);
+        tblToolbar.BackColor = Color.FromArgb(37, 37, 38);
+        pnlOptions.BackColor = Color.FromArgb(37, 37, 38);
+
+        cmbLocation.BackColor = surf;
+        cmbLocation.ForeColor = text;
 
         txtSearch.BackColor   = surf;
         txtSearch.ForeColor   = text;
         txtSearch.BorderStyle = BorderStyle.FixedSingle;
 
-        cmbFilter.BackColor = surf;
-        cmbFilter.ForeColor = text;
-        chkContent.ForeColor = text;
-        chkCase.ForeColor    = text;
+        btnClear.BackColor = Color.FromArgb(37, 37, 38);
+        btnClear.ForeColor = gray;
+
+        // 다크모드에서도 검색 버튼은 파란색 유지
+        btnSearch.BackColor = Color.FromArgb(0, 100, 180);
+        btnSearch.ForeColor = Color.White;
+
+        cmbFilter.BackColor   = surf;
+        cmbFilter.ForeColor   = text;
+        chkContent.ForeColor  = text;
+        chkCase.ForeColor     = text;
         chkWholeWord.ForeColor = text;
-        lblDbInfo.ForeColor  = gray;
-        lblFilter.ForeColor  = text;
+        lblDbInfo.ForeColor   = gray;
+        lblFilter.ForeColor   = text;
 
         listResults.BackColor = Color.FromArgb(25, 25, 25);
         listResults.ForeColor = text;
@@ -360,7 +417,7 @@ public partial class MainForm : Form
 
     private void ApplyLightTheme()
     {
-        var accentGray = Color.FromArgb(243, 243, 243);
+        var toolbar = Color.FromArgb(240, 240, 240);
 
         BackColor = SystemColors.Window;
         ForeColor = SystemColors.WindowText;
@@ -368,15 +425,25 @@ public partial class MainForm : Form
         menuStrip.BackColor = SystemColors.MenuBar;
         menuStrip.ForeColor = SystemColors.MenuText;
 
-        pnlSearch.BackColor  = accentGray;
-        pnlOptions.BackColor = accentGray;
+        pnlSearch.BackColor  = toolbar;
+        tblToolbar.BackColor = toolbar;
+        pnlOptions.BackColor = Color.FromArgb(248, 248, 248);
+
+        cmbLocation.BackColor = SystemColors.Window;
+        cmbLocation.ForeColor = SystemColors.WindowText;
 
         txtSearch.BackColor   = SystemColors.Window;
         txtSearch.ForeColor   = SystemColors.WindowText;
         txtSearch.BorderStyle = BorderStyle.FixedSingle;
 
-        cmbFilter.BackColor = SystemColors.Window;
-        cmbFilter.ForeColor = SystemColors.WindowText;
+        btnClear.BackColor = toolbar;
+        btnClear.ForeColor = Color.FromArgb(100, 100, 100);
+
+        btnSearch.BackColor = Color.FromArgb(0, 120, 212);
+        btnSearch.ForeColor = Color.White;
+
+        cmbFilter.BackColor  = SystemColors.Window;
+        cmbFilter.ForeColor  = SystemColors.WindowText;
         chkContent.ForeColor   = SystemColors.WindowText;
         chkCase.ForeColor      = SystemColors.WindowText;
         chkWholeWord.ForeColor = SystemColors.WindowText;
@@ -395,7 +462,7 @@ public partial class MainForm : Form
         rtbSnippet.BackColor    = Color.FromArgb(252, 252, 252);
         rtbSnippet.ForeColor    = SystemColors.WindowText;
 
-        statusStrip.BackColor = accentGray;
+        statusStrip.BackColor = toolbar;
         statusStrip.ForeColor = SystemColors.WindowText;
         foreach (ToolStripItem item in statusStrip.Items)
             item.ForeColor = SystemColors.WindowText;
@@ -420,7 +487,7 @@ public partial class MainForm : Form
             Color.FromArgb( 50, 160,  90),  // 4: 코드
         ];
         foreach (var clr in palette)
-            imgListSmall.Images.Add(MakeFileIcon(clr));  // ImageList가 소유 — 여기서 dispose 금지
+            imgListSmall.Images.Add(MakeFileIcon(clr));
     }
 
     private static Bitmap MakeFileIcon(Color color)
@@ -432,7 +499,6 @@ public partial class MainForm : Form
         using var line = new Pen(Color.FromArgb(90, Color.White), 1f);
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         g.Clear(Color.Transparent);
-        // 파일 모양 (직각 + 접힌 모서리)
         using var path = new System.Drawing.Drawing2D.GraphicsPath();
         path.AddLines(new PointF[] {
             new(2, 1), new(10, 1), new(13, 4), new(13, 14),
@@ -440,10 +506,8 @@ public partial class MainForm : Form
         });
         g.FillPath(fill, path);
         g.DrawPath(pen, path);
-        // 접힌 모서리
         using var fold = new SolidBrush(Color.FromArgb(60, Color.White));
         g.FillPolygon(fold, new PointF[] { new(10, 1), new(13, 4), new(10, 4) });
-        // 줄무늬
         g.DrawLine(line, 4, 7, 11, 7);
         g.DrawLine(line, 4, 9, 11, 9);
         g.DrawLine(line, 4, 11, 9, 11);
@@ -468,7 +532,7 @@ public partial class MainForm : Form
         lvi.SubItems.Add(Path.GetDirectoryName(r.FilePath) ?? r.FilePath);
         lvi.SubItems.Add(FormatSize(r.FileSize));
         lvi.SubItems.Add(r.ModifiedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
-        lvi.SubItems.Add(FormatMatchType(r));
+        lvi.SubItems.Add(FormatFileType(r.Extension));
         lvi.ToolTipText = r.FilePath;
         return lvi;
     }
@@ -479,45 +543,31 @@ public partial class MainForm : Form
     private void OnColumnClick(object? sender, ColumnClickEventArgs e)
     {
         if (_results.Count == 0) return;
-
-        if (_sortColumn == e.Column)
-            _sortAscending = !_sortAscending;
-        else
-        {
-            _sortColumn    = e.Column;
-            _sortAscending = true;
-        }
+        if (_sortColumn == e.Column) _sortAscending = !_sortAscending;
+        else { _sortColumn = e.Column; _sortAscending = true; }
 
         _results = SortResults(_results, _sortColumn, _sortAscending);
-
-        // 헤더 텍스트에 정렬 방향 표시
         for (int i = 0; i < listResults.Columns.Count; i++)
-        {
             listResults.Columns[i].Text = i == _sortColumn
                 ? _colHeaders[i] + (_sortAscending ? "  ▲" : "  ▼")
                 : _colHeaders[i];
-        }
-
         listResults.Invalidate();
     }
 
-    private static List<SearchResult> SortResults(
-        List<SearchResult> src, int col, bool asc)
+    private static List<SearchResult> SortResults(List<SearchResult> src, int col, bool asc)
     {
         IOrderedEnumerable<SearchResult> ordered = col switch
         {
-            0 => asc ? src.OrderBy(r => r.FileName,  StringComparer.OrdinalIgnoreCase)
+            0 => asc ? src.OrderBy(r => r.FileName, StringComparer.OrdinalIgnoreCase)
                      : src.OrderByDescending(r => r.FileName, StringComparer.OrdinalIgnoreCase),
-            1 => asc ? src.OrderBy(r => Path.GetDirectoryName(r.FilePath) ?? "",
-                                        StringComparer.OrdinalIgnoreCase)
-                     : src.OrderByDescending(r => Path.GetDirectoryName(r.FilePath) ?? "",
-                                        StringComparer.OrdinalIgnoreCase),
+            1 => asc ? src.OrderBy(r => Path.GetDirectoryName(r.FilePath) ?? "", StringComparer.OrdinalIgnoreCase)
+                     : src.OrderByDescending(r => Path.GetDirectoryName(r.FilePath) ?? "", StringComparer.OrdinalIgnoreCase),
             2 => asc ? src.OrderBy(r => r.FileSize)
                      : src.OrderByDescending(r => r.FileSize),
             3 => asc ? src.OrderBy(r => r.ModifiedAt)
                      : src.OrderByDescending(r => r.ModifiedAt),
-            _ => asc ? src.OrderBy(r => r.MatchedInName ? 0 : 1)
-                     : src.OrderByDescending(r => r.MatchedInName ? 0 : 1),
+            _ => asc ? src.OrderBy(r => r.Extension ?? "", StringComparer.OrdinalIgnoreCase)
+                     : src.OrderByDescending(r => r.Extension ?? "", StringComparer.OrdinalIgnoreCase),
         };
         return ordered.ToList();
     }
@@ -528,8 +578,7 @@ public partial class MainForm : Form
     private void OnListSelectionChanged(object? sender, EventArgs e)
     {
         if (!pnlSnippet.Visible) return;
-        var r = GetSelectedResult();
-        UpdateSnippetPanel(r);
+        UpdateSnippetPanel(GetSelectedResult());
     }
 
     private void UpdateSnippetPanel(SearchResult? r)
@@ -540,9 +589,7 @@ public partial class MainForm : Form
             rtbSnippet.Clear();
             return;
         }
-
         lblSnippetPath.Text = r.FilePath;
-
         rtbSnippet.Clear();
         if (!string.IsNullOrWhiteSpace(r.Snippet))
         {
@@ -561,18 +608,13 @@ public partial class MainForm : Form
     private void HighlightKeywordInSnippet(string keyword)
     {
         if (string.IsNullOrEmpty(keyword) || string.IsNullOrEmpty(rtbSnippet.Text)) return;
-
         var text       = rtbSnippet.Text;
-        var comparison = chkCase.Checked
-            ? StringComparison.Ordinal
-            : StringComparison.OrdinalIgnoreCase;
-
+        var comparison = chkCase.Checked ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         int start = 0;
         while (true)
         {
             int idx = text.IndexOf(keyword, start, comparison);
             if (idx < 0) break;
-
             rtbSnippet.Select(idx, keyword.Length);
             rtbSnippet.SelectionBackColor = Color.FromArgb(255, 240, 0);
             rtbSnippet.SelectionColor     = Color.Black;
@@ -597,9 +639,9 @@ public partial class MainForm : Form
 
         if (keyword.Length < 2)
         {
-            _results      = [];
-            _currentPage  = 0;
-            _lastKeyword  = string.Empty;
+            _results     = [];
+            _currentPage = 0;
+            _lastKeyword = string.Empty;
             listResults.VirtualListSize = 0;
             sslResultCount.Text         = "준비";
             _sslPrevPage.Enabled        = false;
@@ -631,33 +673,53 @@ public partial class MainForm : Form
         _sslPrevPage.Enabled = false;
         _sslNextPage.Enabled = false;
 
-        var results = await _searcher.SearchAsync(query);
-
-        if (txtSearch.Text.Trim() != keyword) return;  // stale guard
-
-        _results                    = results;
-        _sortColumn                 = -1;       // 정렬 리셋
-        listResults.VirtualListSize = _results.Count;
-        listResults.Invalidate();
-
-        _sslPrevPage.Enabled = _currentPage > 0;
-        _sslNextPage.Enabled = _results.Count >= _settings.MaxSearchResults;
-
-        string pageInfo = _currentPage > 0 ? $"  p.{_currentPage + 1}" : string.Empty;
-        sslResultCount.Text = _results.Count switch
+        try
         {
-            0 => _currentPage > 0 ? "마지막 페이지" : "결과 없음",
-            _ => $"{_results.Count:N0}개 결과{pageInfo}",
-        };
+            var sw      = Stopwatch.StartNew();
+            var results = await _searcher.SearchAsync(query);
+            sw.Stop();
 
-        // 타이틀바 업데이트
-        Text = _results.Count > 0
-            ? $"SFM — \"{keyword}\" ({_results.Count:N0}개)"
-            : "SFM — Smart File Manager";
+            if (txtSearch.Text.Trim() != keyword) return;  // stale guard
 
-        // 첫 번째 항목 선택 시 스니펫 자동 갱신
-        if (_results.Count > 0 && pnlSnippet.Visible)
-            UpdateSnippetPanel(_results[0]);
+            // 위치 필터 적용 (선택된 경로로 좁히기)
+            if (cmbLocation.SelectedIndex > 0
+                && cmbLocation.SelectedIndex - 1 < _settings.IndexRootPaths.Length)
+            {
+                var rootPath = _settings.IndexRootPaths[cmbLocation.SelectedIndex - 1];
+                results = results
+                    .Where(r => r.FilePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
+            _results                    = results;
+            _sortColumn                 = -1;
+            listResults.VirtualListSize = _results.Count;
+            listResults.Invalidate();
+
+            _sslPrevPage.Enabled = _currentPage > 0;
+            _sslNextPage.Enabled = _results.Count >= _settings.MaxSearchResults;
+
+            // Wise JetSearch 스타일 상태 메시지
+            var elapsed = sw.Elapsed.TotalSeconds;
+            sslResultCount.Text = _results.Count switch
+            {
+                0 when _currentPage > 0 => "마지막 페이지",
+                0 => $"검색 완료.  결과 없음.  경과 시간: {elapsed:F2} 초",
+                _ => $"검색 완료.  {_results.Count:N0} 파일/폴더 발견.  경과 시간: {elapsed:F3} 초",
+            };
+
+            Text = _results.Count > 0
+                ? $"SFM — \"{keyword}\" ({_results.Count:N0}개)"
+                : "SFM — Smart File Manager";
+
+            if (_results.Count > 0 && pnlSnippet.Visible)
+                UpdateSnippetPanel(_results[0]);
+        }
+        catch (Exception ex)
+        {
+            sslResultCount.Text = $"검색 오류: {ex.Message}";
+            Debug.WriteLine($"[RunSearchAsync] {ex}");
+        }
     }
 
     private void ResetSortHeaders()
@@ -686,10 +748,8 @@ public partial class MainForm : Form
                 e.Handled = true;
                 break;
             case Keys.Escape:
-                if (_recentBox.Visible)
-                    _recentBox.Visible = false;
-                else
-                    txtSearch.Clear();
+                if (_recentBox.Visible) _recentBox.Visible = false;
+                else                    txtSearch.Clear();
                 e.Handled = true;
                 break;
             case Keys.Enter:
@@ -742,7 +802,6 @@ public partial class MainForm : Form
         _recentBox.Location = new Point(formPt.X, pnlSearch.Bottom);
         _recentBox.Width    = txtSearch.Width;
         _recentBox.Height   = Math.Min(recents.Count * 22 + 4, 180);
-
         _recentBox.BringToFront();
         _recentBox.Visible = true;
     }
@@ -754,43 +813,39 @@ public partial class MainForm : Form
     {
         switch (keyData)
         {
-            // Enter — 검색창 포커스 시 즉시 검색 (MenuStrip·AcceptButton 우선 처리 전에 가로챔)
             case Keys.Enter when txtSearch.Focused:
                 if (_recentBox.Visible)
                 {
-                    // 드롭다운에서 선택 항목이 있으면 해당 키워드로 검색
-                    if (_recentBox.SelectedItem is string sel)
-                        txtSearch.Text = sel;
+                    if (_recentBox.SelectedItem is string sel) txtSearch.Text = sel;
                     _recentBox.Visible = false;
                 }
                 _debounceTimer.Stop();
                 _ = RunSearchAsync();
-                return true;   // 이 키를 폼이 소비 → TextBox.KeyDown 으로 내려가지 않음
+                return true;
 
-            // Ctrl+F — 검색창 포커스
             case Keys.Control | Keys.F:
                 txtSearch.Focus();
                 txtSearch.SelectAll();
                 return true;
 
-            // Ctrl+C — 경로 복사 (ListView 포커스 시)
+            case Keys.Control | Keys.A when listResults.ContainsFocus || listResults.Focused:
+                SelectAll();
+                return true;
+
             case Keys.Control | Keys.C when listResults.Focused:
                 CopySelectedPaths();
                 return true;
 
-            // Alt+← — 이전 페이지
             case Keys.Alt | Keys.Left when _sslPrevPage.Enabled:
                 _currentPage--;
                 _ = RunSearchAsync();
                 return true;
 
-            // Alt+→ — 다음 페이지
             case Keys.Alt | Keys.Right when _sslNextPage.Enabled:
                 _currentPage++;
                 _ = RunSearchAsync();
                 return true;
 
-            // F4 — 내용 검색 토글
             case Keys.F4:
                 chkContent.Checked        = !chkContent.Checked;
                 tsmiSearchContent.Checked = chkContent.Checked;
@@ -837,10 +892,7 @@ public partial class MainForm : Form
     {
         var r = GetSelectedResult();
         if (r is null) return;
-        try
-        {
-            Process.Start(new ProcessStartInfo(r.FilePath) { UseShellExecute = true });
-        }
+        try { Process.Start(new ProcessStartInfo(r.FilePath) { UseShellExecute = true }); }
         catch (Exception ex)
         {
             MessageBox.Show($"파일을 열 수 없습니다.\n{ex.Message}",
@@ -864,22 +916,211 @@ public partial class MainForm : Form
         }
     }
 
+    private void MoveSelectedFiles()
+    {
+        var selected = GetSelectedResults().ToList();
+        if (selected.Count == 0) return;
+
+        using var dlg = new FolderBrowserDialog
+        {
+            Description          = $"{selected.Count}개 파일을 이동할 폴더를 선택하세요",
+            UseDescriptionForTitle = true,
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        var dest    = dlg.SelectedPath;
+        var errors  = new List<string>();
+        foreach (var r in selected)
+        {
+            try
+            {
+                var target = Path.Combine(dest, r.FileName);
+                if (File.Exists(target))
+                {
+                    var ans = MessageBox.Show(
+                        $"'{r.FileName}' 이(가) 이미 존재합니다. 덮어쓸까요?",
+                        "이동 확인", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                    if (ans == DialogResult.Cancel) break;
+                    if (ans == DialogResult.No) continue;
+                }
+                File.Move(r.FilePath, target, overwrite: true);
+                _indexer.RemoveFile(r.FilePath);
+            }
+            catch (Exception ex) { errors.Add($"{r.FileName}: {ex.Message}"); }
+        }
+
+        if (errors.Count > 0)
+            MessageBox.Show("다음 파일을 이동하지 못했습니다:\n\n" + string.Join('\n', errors.Take(10)),
+                "이동 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+        _ = RunSearchAsync();
+    }
+
+    private void DeleteSelectedFiles()
+    {
+        var selected = GetSelectedResults().ToList();
+        if (selected.Count == 0) return;
+
+        var msg = selected.Count == 1
+            ? $"'{selected[0].FileName}'\n파일을 휴지통으로 이동할까요?"
+            : $"{selected.Count}개 파일을 휴지통으로 이동할까요?";
+
+        if (MessageBox.Show(msg, "파일 삭제", MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question) != DialogResult.Yes) return;
+
+        var errors = new List<string>();
+        foreach (var r in selected)
+        {
+            try
+            {
+                RecycleFile(r.FilePath);
+                _indexer.RemoveFile(r.FilePath);
+            }
+            catch (Exception ex) { errors.Add($"{r.FileName}: {ex.Message}"); }
+        }
+
+        if (errors.Count > 0)
+            MessageBox.Show("다음 파일을 삭제하지 못했습니다:\n\n" + string.Join('\n', errors.Take(10)),
+                "삭제 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+        _ = RunSearchAsync();
+    }
+
+    /// <summary>파일을 휴지통으로 보낸다 (Shell32 SHFileOperation 사용).</summary>
+    private static void RecycleFile(string path)
+    {
+        var op = new NativeShFileOp
+        {
+            wFunc  = 3,                   // FO_DELETE
+            pFrom  = path + '\0' + '\0',  // double-null 종료
+            fFlags = (short)(0x0040       // FOF_ALLOWUNDO  → 휴지통
+                           | 0x0010       // FOF_NOCONFIRMATION
+                           | 0x0400),     // FOF_NOERRORUI
+        };
+        NativeMethods.SHFileOperation(ref op);
+    }
+
+    private void ShowProperties()
+    {
+        var r = GetSelectedResult();
+        if (r is null) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo(r.FilePath)
+            {
+                Verb           = "properties",
+                UseShellExecute = true,
+            });
+        }
+        catch
+        {
+            // fallback: 간단한 정보 표시
+            var fi = new FileInfo(r.FilePath);
+            MessageBox.Show(
+                $"이름:     {fi.Name}\n" +
+                $"경로:     {fi.DirectoryName}\n" +
+                $"크기:     {FormatSize(fi.Length)}\n" +
+                $"만든 날짜: {fi.CreationTime:yyyy-MM-dd HH:mm:ss}\n" +
+                $"수정 날짜: {fi.LastWriteTime:yyyy-MM-dd HH:mm:ss}\n" +
+                $"특성:     {fi.Attributes}",
+                "파일 속성", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // 선택 조작
+    // ─────────────────────────────────────────────────────────
+    private void SelectAll()
+    {
+        if (_results.Count == 0) return;
+        listResults.BeginUpdate();
+        for (int i = 0; i < _results.Count; i++)
+            listResults.SelectedIndices.Add(i);
+        listResults.EndUpdate();
+    }
+
+    private void InvertSelection()
+    {
+        if (_results.Count == 0) return;
+        var selected = new HashSet<int>(listResults.SelectedIndices.Cast<int>());
+        listResults.BeginUpdate();
+        listResults.SelectedIndices.Clear();
+        for (int i = 0; i < _results.Count; i++)
+            if (!selected.Contains(i))
+                listResults.SelectedIndices.Add(i);
+        listResults.EndUpdate();
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // 클립보드 복사
+    // ─────────────────────────────────────────────────────────
     private void CopySelectedPaths()
     {
-        var paths = string.Join(Environment.NewLine,
+        var text = string.Join(Environment.NewLine,
             GetSelectedResults().Select(r => r.FilePath));
-        if (!string.IsNullOrEmpty(paths))
-            try { Clipboard.SetText(paths); } catch { }
+        if (!string.IsNullOrEmpty(text))
+            try { Clipboard.SetText(text); } catch { }
+    }
+
+    private void CopySelectedDirs()
+    {
+        var text = string.Join(Environment.NewLine,
+            GetSelectedResults()
+                .Select(r => Path.GetDirectoryName(r.FilePath) ?? r.FilePath)
+                .Distinct());
+        if (!string.IsNullOrEmpty(text))
+            try { Clipboard.SetText(text); } catch { }
     }
 
     private void CopySelectedNames()
     {
-        var names = string.Join(Environment.NewLine,
+        var text = string.Join(Environment.NewLine,
             GetSelectedResults().Select(r => r.FileName));
-        if (!string.IsNullOrEmpty(names))
-            try { Clipboard.SetText(names); } catch { }
+        if (!string.IsNullOrEmpty(text))
+            try { Clipboard.SetText(text); } catch { }
     }
 
+    // ─────────────────────────────────────────────────────────
+    // 텍스트 파일로 저장
+    // ─────────────────────────────────────────────────────────
+    private void SaveResultsAsText()
+    {
+        if (_results.Count == 0) return;
+
+        using var dlg = new SaveFileDialog
+        {
+            Title      = "결과를 텍스트 파일로 저장",
+            Filter     = "텍스트 파일 (*.txt)|*.txt|모든 파일 (*.*)|*.*",
+            FileName   = $"SFM_결과_{DateTime.Now:yyyyMMdd_HHmmss}.txt",
+            DefaultExt = "txt",
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        try
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"SFM 검색 결과 — \"{txtSearch.Text.Trim()}\"");
+            sb.AppendLine($"저장 시각: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            sb.AppendLine($"총 {_results.Count:N0}개 파일");
+            sb.AppendLine(new string('─', 80));
+            foreach (var r in _results)
+            {
+                sb.AppendLine(r.FilePath);
+                sb.AppendLine($"  크기: {FormatSize(r.FileSize)}  수정: {r.ModifiedAt.ToLocalTime():yyyy-MM-dd HH:mm}  유형: {FormatFileType(r.Extension)}");
+            }
+            File.WriteAllText(dlg.FileName, sb.ToString(), System.Text.Encoding.UTF8);
+            sslResultCount.Text = $"저장 완료: {dlg.FileName}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"저장 실패: {ex.Message}", "SFM",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // 인덱스에서 제거
+    // ─────────────────────────────────────────────────────────
     private void OnDeleteFromIndex(object? sender, EventArgs e)
     {
         var selected = GetSelectedResults().ToList();
@@ -905,20 +1146,17 @@ public partial class MainForm : Form
     {
         using var dlg = new IndexSettingsForm(_indexer, _db, _settings);
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
-
-        // 설정 반영
         chkContent.Checked = _settings.EnableContentSearch;
         _watcher.StopWatching();
         _watcher.StartWatching(_settings.IndexRootPaths);
+        PopulateLocationDropdown();
         _ = RunSearchAsync();
     }
 
     private void OnReindexClick(object? sender, EventArgs e)
     {
         if (MessageBox.Show("전체 재인덱싱을 시작하시겠습니까?\n시간이 걸릴 수 있습니다.",
-                "SFM", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-            return;
-
+                "SFM", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
         sslIndexStatus.Text = "재인덱싱 준비 중…";
         _ = _indexer.BuildIndexAsync(_settings.IndexRootPaths);
     }
@@ -937,16 +1175,9 @@ public partial class MainForm : Form
             try
             {
                 _db.Vacuum();
-                Invoke(() =>
-                {
-                    sslIndexStatus.Text = "DB 최적화 완료";
-                    RefreshDbStats();
-                });
+                Invoke(() => { sslIndexStatus.Text = "DB 최적화 완료"; RefreshDbStats(); });
             }
-            catch (Exception ex)
-            {
-                Invoke(() => sslIndexStatus.Text = $"최적화 실패: {ex.Message}");
-            }
+            catch (Exception ex) { Invoke(() => sslIndexStatus.Text = $"최적화 실패: {ex.Message}"); }
         });
     }
 
@@ -958,8 +1189,8 @@ public partial class MainForm : Form
         try
         {
             var stats = _db.GetIndexStats();
-            lblDbInfo.Text     = $"파일 {stats.TotalFiles:N0}개  ·  DB {stats.DatabaseSizeMb:F1} MB";
-            sslDbStats.Text    = $"인덱스: {stats.TotalFiles:N0}개 파일 ({stats.DatabaseSizeMb:F1} MB)";
+            lblDbInfo.Text  = $"인덱스: {stats.TotalFiles:N0}개 파일  ·  {stats.DatabaseSizeMb:F1} MB";
+            sslDbStats.Text = $"인덱스: {stats.TotalFiles:N0}개 파일 ({stats.DatabaseSizeMb:F1} MB)";
         }
         catch { /* ignore */ }
     }
@@ -971,7 +1202,6 @@ public partial class MainForm : Form
     {
         if (_results.Count == 0) return;
         listResults.AutoResizeColumns(ColumnHeaderAutoResizeStyle.ColumnContent);
-        // 파일명 최소 너비 보장
         if (colFileName.Width < 160) colFileName.Width = 160;
     }
 
@@ -980,20 +1210,43 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     private static string FormatSize(long bytes) => bytes switch
     {
-        < 1_024             => $"{bytes} B",
-        < 1_048_576         => $"{bytes / 1_024.0:F1} KB",
-        < 1_073_741_824     => $"{bytes / 1_048_576.0:F1} MB",
-        _                   => $"{bytes / 1_073_741_824.0:F1} GB",
+        < 1_024         => $"{bytes} Bytes",
+        < 1_048_576     => $"{bytes / 1_024.0:F1} KB",
+        < 1_073_741_824 => $"{bytes / 1_048_576.0:F1} MB",
+        _               => $"{bytes / 1_073_741_824.0:F1} GB",
     };
 
-    private static string FormatMatchType(SearchResult r) =>
-        (r.MatchedInName, r.MatchedInContent) switch
-        {
-            (true,  true)  => "이름+내용",
-            (true,  false) => "파일명",
-            (false, true)  => "내용",
-            _              => "-",
-        };
+    private static string FormatFileType(string? ext) => ext?.ToLowerInvariant() switch
+    {
+        ".docx" or ".doc" => "Word 문서",
+        ".xlsx" or ".xls" => "Excel",
+        ".pptx" or ".ppt" => "PowerPoint",
+        ".pdf"            => "PDF",
+        ".txt"            => "텍스트",
+        ".md"             => "Markdown",
+        ".rtf"            => "서식 있는 텍스트",
+        ".jpg" or ".jpeg" => "JPEG 이미지",
+        ".png"            => "PNG 이미지",
+        ".gif"            => "GIF",
+        ".bmp"            => "비트맵",
+        ".svg"            => "SVG",
+        ".cs"             => "C# 소스",
+        ".py"             => "Python",
+        ".js"             => "JavaScript",
+        ".ts"             => "TypeScript",
+        ".html" or ".htm" => "HTML",
+        ".css"            => "CSS",
+        ".sql"            => "SQL",
+        ".json"           => "JSON",
+        ".xml"            => "XML",
+        ".zip"            => "ZIP 압축",
+        ".rar"            => "RAR 압축",
+        ".7z"             => "7-Zip",
+        ".exe"            => "실행 파일",
+        ".lnk"            => "바로 가기",
+        null or ""        => "파일",
+        var e             => $"{e.TrimStart('.').ToUpperInvariant()} 파일",
+    };
 
     // ─────────────────────────────────────────────────────────
     // 폼 종료
@@ -1008,7 +1261,6 @@ public partial class MainForm : Form
         _settings.WindowMaximized = (WindowState == FormWindowState.Maximized);
         if (WindowState == FormWindowState.Normal)
         {
-            // 최대화 상태에서는 RestoreBounds로 원래 크기 저장
             _settings.WindowX      = Location.X;
             _settings.WindowY      = Location.Y;
             _settings.WindowWidth  = Size.Width;
@@ -1023,7 +1275,6 @@ public partial class MainForm : Form
             _settings.WindowHeight = rb.Height;
         }
         _settings.Save();
-
         base.OnFormClosed(e);
     }
 }
