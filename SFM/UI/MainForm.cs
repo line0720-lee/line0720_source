@@ -409,10 +409,7 @@ public partial class MainForm : Form
             Color.FromArgb( 50, 160,  90),  // 4: 코드
         ];
         foreach (var clr in palette)
-        {
-            using var bmp = MakeFileIcon(clr);
-            imgListSmall.Images.Add(bmp);
-        }
+            imgListSmall.Images.Add(MakeFileIcon(clr));  // ImageList가 소유 — 여기서 dispose 금지
     }
 
     private static Bitmap MakeFileIcon(Color color)
