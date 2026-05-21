@@ -35,10 +35,6 @@ public partial class MainForm : Form
     private bool _sortAscending = true;
     private readonly string[] _colHeaders = ["이름", "경로", "파일 크기", "수정 날짜", "유형"];
 
-    // 트리 상태
-    private const string TreePlaceholder = "\0placeholder";
-    private bool _treeCheckSuppressed = false;   // 프로그래밍 체크 시 이벤트 억제
-
     // ─────────────────────────────────────────────────────────
     // 파일유형 필터
     // ─────────────────────────────────────────────────────────
@@ -99,7 +95,6 @@ public partial class MainForm : Form
 
         InitImageList();
         InitPagination();
-        InitFolderTree();
 
         // ── 이벤트 연결 전에 초기 UI 상태를 설정 (CheckedChanged 이벤트 오발 방지) ──
         chkContent.Checked         = _settings.EnableContentSearch;
@@ -112,21 +107,6 @@ public partial class MainForm : Form
 
         _watcher.StartWatching(_settings.IndexRootPaths);
         ActiveControl = txtSearch;
-
-        // MinSize / SplitterDistance 는 Load 이벤트에서 폼 크기 확정 후 설정.
-        // EndInit() 시 Width=0 → ApplyPanel2MinSize 내부에서 제약 위반 오류 방지.
-        Load += (_, _) =>
-        {
-            try
-            {
-                splitMain.Panel1MinSize    = 120;
-                splitMain.Panel2MinSize    = 200;
-                splitMain.SplitterDistance = Math.Clamp(220,
-                    splitMain.Panel1MinSize,
-                    splitMain.Width - splitMain.Panel2MinSize - splitMain.SplitterWidth);
-            }
-            catch { /* 방어적 처리 */ }
-        };
     }
 
     // ─────────────────────────────────────────────────────────
@@ -138,125 +118,6 @@ public partial class MainForm : Form
         if (_settings.WindowX >= 0 && _settings.WindowY >= 0)
         { StartPosition = FormStartPosition.Manual; Location = new Point(_settings.WindowX, _settings.WindowY); }
         Size = new Size(_settings.WindowWidth, _settings.WindowHeight);
-    }
-
-    // ─────────────────────────────────────────────────────────
-    // 폴더 트리 초기화
-    // ─────────────────────────────────────────────────────────
-    private void InitFolderTree()
-    {
-        _treeCheckSuppressed = true;
-        tvFolders.BeginUpdate();
-        tvFolders.Nodes.Clear();
-
-        foreach (var drive in DriveInfo.GetDrives())
-        {
-            if (!drive.IsReady) continue;
-            try
-            {
-                var label = string.IsNullOrWhiteSpace(drive.VolumeLabel)
-                    ? drive.Name.TrimEnd('\\')
-                    : $"{drive.Name.TrimEnd('\\')}  [{drive.VolumeLabel}]";
-
-                var node = new TreeNode(label)
-                {
-                    Tag                = drive.RootDirectory.FullName,
-                    ImageIndex         = 0,
-                    SelectedImageIndex = 0,
-                    ToolTipText        = drive.RootDirectory.FullName,
-                };
-                // 드라이브 내부 탐색을 위한 플레이스홀더
-                node.Nodes.Add(new TreeNode(TreePlaceholder));
-                tvFolders.Nodes.Add(node);
-            }
-            catch { /* 접근 불가 드라이브 무시 */ }
-        }
-
-        tvFolders.EndUpdate();
-        _treeCheckSuppressed = false;
-        UpdateFolderButtonText();
-    }
-
-    /// <summary>노드 확장 시 하위 폴더를 지연 로드한다.</summary>
-    private void OnTreeBeforeExpand(object? sender, TreeViewCancelEventArgs e)
-    {
-        var node = e.Node!;
-        if (node.Tag is not string path) return;
-        if (node.Nodes.Count == 1 && node.Nodes[0].Text == TreePlaceholder)
-        {
-            node.Nodes.Clear();
-            LoadSubfolders(node, path);
-        }
-    }
-
-    private void LoadSubfolders(TreeNode parent, string path)
-    {
-        try
-        {
-            var dirs = Directory.GetDirectories(path)
-                .Where(d => !IsHiddenOrSystem(d))
-                .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-
-            foreach (var dir in dirs)
-            {
-                var name  = Path.GetFileName(dir);
-                var child = new TreeNode(name)
-                {
-                    Tag                = dir,
-                    ImageIndex         = 1,
-                    SelectedImageIndex = 2,
-                    ToolTipText        = dir,
-                };
-                // 자식 폴더 유무 확인 (성능을 위해 Any() 사용)
-                try
-                {
-                    if (Directory.EnumerateDirectories(dir).Any())
-                        child.Nodes.Add(new TreeNode(TreePlaceholder));
-                }
-                catch { /* access denied */ }
-
-                parent.Nodes.Add(child);
-            }
-        }
-        catch { /* 접근 거부 폴더 무시 */ }
-    }
-
-    private static bool IsHiddenOrSystem(string path)
-    {
-        try
-        {
-            var attrs = File.GetAttributes(path);
-            return (attrs & (FileAttributes.Hidden | FileAttributes.System)) != 0;
-        }
-        catch { return true; }
-    }
-
-    /// <summary>체크된 폴더 경로 목록을 반환한다. 부모가 체크된 경우 자식은 수집하지 않는다.</summary>
-    private List<string> GetCheckedFolders()
-    {
-        var paths = new List<string>();
-        CollectCheckedNodes(tvFolders.Nodes, paths);
-        return paths;
-    }
-
-    private static void CollectCheckedNodes(TreeNodeCollection nodes, List<string> result)
-    {
-        foreach (TreeNode node in nodes)
-        {
-            if (node.Checked && node.Tag is string path)
-                result.Add(path);           // 부모 체크 → 자식 수집 불필요
-            else
-                CollectCheckedNodes(node.Nodes, result);
-        }
-    }
-
-    private void UpdateFolderButtonText()
-    {
-        var count = GetCheckedFolders().Count;
-        btnFolderPanel.Text = count == 0
-            ? "📂 모든 위치"
-            : $"📂 {count}개 선택";
     }
 
     // ─────────────────────────────────────────────────────────
@@ -275,11 +136,6 @@ public partial class MainForm : Form
         ];
         foreach (var clr in palette)
             imgListSmall.Images.Add(MakeFileIcon(clr));
-
-        // 트리 아이콘 (imgListTree)
-        imgListTree.Images.Add(MakeDriveIcon());              // 0: 드라이브
-        imgListTree.Images.Add(MakeFolderIcon(false));        // 1: 폴더 (닫힘)
-        imgListTree.Images.Add(MakeFolderIcon(true));         // 2: 폴더 (열림)
     }
 
     private static Bitmap MakeFileIcon(Color color)
@@ -300,50 +156,6 @@ public partial class MainForm : Form
         g.DrawLine(line, 4, 7, 11, 7);
         g.DrawLine(line, 4, 9, 11, 9);
         g.DrawLine(line, 4, 11, 9, 11);
-        return bmp;
-    }
-
-    private static Bitmap MakeDriveIcon()
-    {
-        var bmp = new Bitmap(16, 16);
-        using var g    = Graphics.FromImage(bmp);
-        using var fill = new SolidBrush(Color.FromArgb(90, 100, 120));
-        using var pen  = new Pen(Color.FromArgb(60, 70, 90));
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        g.Clear(Color.Transparent);
-        // 디스크 모양
-        g.FillEllipse(fill, 1, 4, 14, 9);
-        g.DrawEllipse(pen,  1, 4, 14, 9);
-        g.FillEllipse(fill, 1, 2, 14, 5);
-        g.DrawEllipse(pen,  1, 2, 14, 5);
-        using var hl = new SolidBrush(Color.FromArgb(80, Color.White));
-        g.FillEllipse(hl, 2, 2, 12, 3);
-        return bmp;
-    }
-
-    private static Bitmap MakeFolderIcon(bool open)
-    {
-        var bmp  = new Bitmap(16, 16);
-        using var g    = Graphics.FromImage(bmp);
-        var body = open ? Color.FromArgb(255, 200, 40) : Color.FromArgb(255, 185, 15);
-        var tab  = open ? Color.FromArgb(230, 170, 30) : Color.FromArgb(220, 160, 10);
-        using var bodyBrush = new SolidBrush(body);
-        using var tabBrush  = new SolidBrush(tab);
-        using var pen       = new Pen(Color.FromArgb(160, 120, 0));
-        g.SmoothingMode     = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        g.Clear(Color.Transparent);
-        // 탭
-        g.FillRectangle(tabBrush, 1, 4, 6, 3);
-        // 폴더 본체
-        g.FillRectangle(bodyBrush, 1, 6, 14, 8);
-        g.DrawRectangle(pen, 1, 6, 13, 7);
-        g.DrawRectangle(pen, 1, 4,  5, 2);
-        if (open)
-        {
-            // 열린 폴더: 약간 그림자
-            using var dark = new SolidBrush(Color.FromArgb(40, Color.Black));
-            g.FillRectangle(dark, 1, 13, 14, 1);
-        }
         return bmp;
     }
 
@@ -370,26 +182,6 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     private void WireEvents()
     {
-        // ── 폴더 패널 토글 ─────────────────────────────────────
-        btnFolderPanel.Click += (_, _) =>
-        {
-            splitMain.Panel1Collapsed = !splitMain.Panel1Collapsed;
-            tsmiViewFolderTree.Checked = !splitMain.Panel1Collapsed;
-        };
-
-        // ── 트리 이벤트 ─────────────────────────────────────────
-        tvFolders.BeforeExpand += OnTreeBeforeExpand;
-        tvFolders.AfterCheck   += OnTreeAfterCheck;
-
-        btnClearTree.Click += (_, _) =>
-        {
-            _treeCheckSuppressed = true;
-            ClearAllChecks(tvFolders.Nodes);
-            _treeCheckSuppressed = false;
-            UpdateFolderButtonText();
-            if (txtSearch.Text.Trim().Length >= 2) _ = RunSearchAsync();
-        };
-
         // ── 툴바 버튼 ────────────────────────────────────────────
         btnSearch.Click += (_, _) => { _debounceTimer.Stop(); _ = RunSearchAsync(); };
         btnClear.Click  += (_, _) => { txtSearch.Clear(); txtSearch.Focus(); };
@@ -460,11 +252,7 @@ public partial class MainForm : Form
         tsmiFileExit.Click      += (_, _) => Close();
 
         tsmiViewDark.Click += (_, _) => { _settings.IsDarkMode = tsmiViewDark.Checked; ApplyTheme(); };
-        tsmiViewSnippet.Click     += (_, _) => pnlSnippet.Visible = tsmiViewSnippet.Checked;
-        tsmiViewFolderTree.Click  += (_, _) =>
-        {
-            splitMain.Panel1Collapsed = !tsmiViewFolderTree.Checked;
-        };
+        tsmiViewSnippet.Click += (_, _) => pnlSnippet.Visible = tsmiViewSnippet.Checked;
         tsmiViewAutoCol.Click += (_, _) => AutoResizeColumns();
 
         tsmiSearchContent.Click += (_, _) => chkContent.Checked = tsmiSearchContent.Checked;
@@ -478,7 +266,7 @@ public partial class MainForm : Form
         tsmiHelpAbout.Click += (_, _) => MessageBox.Show(
             "SFM — Smart File Manager v1.0\n\n로컬 파일 전문 검색 도구\n" +
             "파일명 + 내용 인덱싱 · 한국어 초성 검색 지원\n\n단축키\n" +
-            "  Ctrl+F     검색창 포커스\n  Ctrl+T     폴더 트리 토글\n" +
+            "  Ctrl+F     검색창 포커스\n" +
             "  F4         내용 검색 토글\n  F5         전체 재인덱싱\n" +
             "  Enter      파일 열기 / 검색\n  Ctrl+C     경로 복사\n" +
             "  Ctrl+A     전체 선택\n  Alt+←/→   이전/다음 페이지\n  Esc        검색어 지우기",
@@ -496,27 +284,6 @@ public partial class MainForm : Form
             if (!string.IsNullOrWhiteSpace(txtSearch.Text)) _ = RunSearchAsync();
         });
         _indexer.IndexErrorOccurred += err => Debug.WriteLine($"[IndexError] {err.FilePath}: {err.Message}");
-    }
-
-    private static void ClearAllChecks(TreeNodeCollection nodes)
-    {
-        foreach (TreeNode node in nodes)
-        {
-            node.Checked = false;
-            if (node.Nodes.Count > 0) ClearAllChecks(node.Nodes);
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────
-    // 트리 AfterCheck
-    // ─────────────────────────────────────────────────────────
-    private void OnTreeAfterCheck(object? sender, TreeViewEventArgs e)
-    {
-        if (_treeCheckSuppressed) return;
-        if (e.Action == TreeViewAction.Unknown) return;  // 프로그래밍 조작 무시
-
-        UpdateFolderButtonText();
-        if (txtSearch.Text.Trim().Length >= 2) _ = RunSearchAsync();
     }
 
     // ─────────────────────────────────────────────────────────
@@ -543,10 +310,6 @@ public partial class MainForm : Form
         pnlSearch.BackColor = tblToolbar.BackColor = Color.FromArgb(37, 37, 38);
         pnlOptions.BackColor = Color.FromArgb(37, 37, 38);
 
-        btnFolderPanel.BackColor = Color.FromArgb(55, 55, 58);
-        btnFolderPanel.ForeColor = text;
-        btnFolderPanel.FlatAppearance.BorderColor = Color.FromArgb(70, 70, 75);
-
         txtSearch.BackColor = surf; txtSearch.ForeColor = text; txtSearch.BorderStyle = BorderStyle.FixedSingle;
         btnClear.BackColor = Color.FromArgb(37, 37, 38); btnClear.ForeColor = gray;
         btnSearch.BackColor = Color.FromArgb(0, 100, 180); btnSearch.ForeColor = Color.White;
@@ -554,14 +317,6 @@ public partial class MainForm : Form
         chkContent.ForeColor = text; lblFilter.ForeColor = gray;
         chkTypeDoc.ForeColor = chkTypePdf.ForeColor = chkTypeImage.ForeColor = chkTypeCode.ForeColor = text;
         lblDbInfo.ForeColor = gray;
-
-        // 트리 패널
-        pnlTreeHeader.BackColor = Color.FromArgb(37, 37, 38);
-        lblTreeTitle.ForeColor  = text;
-        btnClearTree.BackColor  = Color.FromArgb(50, 50, 55);
-        btnClearTree.ForeColor  = gray;
-        tvFolders.BackColor     = Color.FromArgb(30, 30, 32);
-        tvFolders.ForeColor     = text;
 
         listResults.BackColor = Color.FromArgb(25, 25, 25); listResults.ForeColor = text;
 
@@ -587,10 +342,6 @@ public partial class MainForm : Form
         pnlSearch.BackColor = tblToolbar.BackColor = toolbar;
         pnlOptions.BackColor = Color.FromArgb(248, 248, 248);
 
-        btnFolderPanel.BackColor = SystemColors.Window;
-        btnFolderPanel.ForeColor = SystemColors.WindowText;
-        btnFolderPanel.FlatAppearance.BorderColor = Color.FromArgb(180, 180, 180);
-
         txtSearch.BackColor = SystemColors.Window; txtSearch.ForeColor = SystemColors.WindowText;
         txtSearch.BorderStyle = BorderStyle.FixedSingle;
         btnClear.BackColor = toolbar; btnClear.ForeColor = Color.FromArgb(100, 100, 100);
@@ -599,14 +350,6 @@ public partial class MainForm : Form
         chkContent.ForeColor = SystemColors.WindowText; lblFilter.ForeColor = SystemColors.GrayText;
         chkTypeDoc.ForeColor = chkTypePdf.ForeColor = chkTypeImage.ForeColor = chkTypeCode.ForeColor = SystemColors.WindowText;
         lblDbInfo.ForeColor = SystemColors.GrayText;
-
-        // 트리 패널
-        pnlTreeHeader.BackColor = Color.FromArgb(235, 235, 235);
-        lblTreeTitle.ForeColor  = SystemColors.WindowText;
-        btnClearTree.BackColor  = Color.FromArgb(235, 235, 235);
-        btnClearTree.ForeColor  = SystemColors.GrayText;
-        tvFolders.BackColor     = SystemColors.Window;
-        tvFolders.ForeColor     = SystemColors.WindowText;
 
         listResults.BackColor = SystemColors.Window; listResults.ForeColor = SystemColors.WindowText;
 
@@ -753,16 +496,6 @@ public partial class MainForm : Form
             sw.Stop();
             if (txtSearch.Text.Trim() != keyword) return;
 
-            // ── 폴더 트리 선택 필터 ───────────────────────────────
-            var checkedFolders = GetCheckedFolders();
-            if (checkedFolders.Count > 0)
-            {
-                results = results
-                    .Where(r => checkedFolders.Any(f =>
-                        r.FilePath.StartsWith(f, StringComparison.OrdinalIgnoreCase)))
-                    .ToList();
-            }
-
             _results = results; _sortColumn = -1;
             listResults.VirtualListSize = _results.Count;
             listResults.Invalidate();
@@ -853,10 +586,6 @@ public partial class MainForm : Form
                 _debounceTimer.Stop(); _ = RunSearchAsync(); return true;
             case Keys.Control | Keys.F:
                 txtSearch.Focus(); txtSearch.SelectAll(); return true;
-            case Keys.Control | Keys.T:
-                splitMain.Panel1Collapsed = !splitMain.Panel1Collapsed;
-                tsmiViewFolderTree.Checked = !splitMain.Panel1Collapsed;
-                return true;
             case Keys.Control | Keys.A when listResults.ContainsFocus || listResults.Focused:
                 SelectAll(); return true;
             case Keys.Control | Keys.C when listResults.Focused:

@@ -23,7 +23,6 @@ partial class MainForm
         tsmiView            = new ToolStripMenuItem();
         tsmiViewDark        = new ToolStripMenuItem();
         tsmiViewSnippet     = new ToolStripMenuItem();
-        tsmiViewFolderTree  = new ToolStripMenuItem();
         tsmiViewSep1        = new ToolStripSeparator();
         tsmiViewAutoCol     = new ToolStripMenuItem();
         tsmiSearch          = new ToolStripMenuItem();
@@ -43,7 +42,6 @@ partial class MainForm
         // ── 툴바 패널 ─────────────────────────────────────────────
         pnlSearch           = new Panel();
         tblToolbar          = new TableLayoutPanel();
-        btnFolderPanel      = new Button();   // 폴더 트리 토글 버튼 (cmbLocation 대체)
         txtSearch           = new TextBox();
         btnClear            = new Button();
         btnSearch           = new Button();
@@ -59,23 +57,15 @@ partial class MainForm
         chkTypeCode         = new CheckBox();
         lblDbInfo           = new Label();
 
-        // ── 메인 SplitContainer ──────────────────────────────────
-        splitMain           = new SplitContainer();
-
-        // ── 폴더 트리 패널 (Panel1) ──────────────────────────────
-        pnlTreeHeader       = new Panel();
-        lblTreeTitle        = new Label();
-        btnClearTree        = new Button();
-        tvFolders           = new TreeView();
-        imgListTree         = new ImageList(components);
-
-        // ── 결과 + 스니펫 패널 (Panel2) ──────────────────────────
+        // ── 스니펫 패널 ──────────────────────────────────────────
         pnlSnippet          = new Panel();
         pnlSnippetBar       = new Panel();
         lblSnippetIcon      = new Label();
         lblSnippetPath      = new Label();
         btnSnippetClose     = new Button();
         rtbSnippet          = new RichTextBox();
+
+        // ── 결과 목록 ────────────────────────────────────────────
         listResults         = new ListView();
 
         // ── 상태바 ───────────────────────────────────────────────
@@ -120,11 +110,6 @@ partial class MainForm
         pnlSearch.SuspendLayout();
         tblToolbar.SuspendLayout();
         pnlOptions.SuspendLayout();
-        splitMain.BeginInit();
-        splitMain.Panel1.SuspendLayout();
-        splitMain.Panel2.SuspendLayout();
-        splitMain.SuspendLayout();
-        pnlTreeHeader.SuspendLayout();
         pnlSnippet.SuspendLayout();
         pnlSnippetBar.SuspendLayout();
         statusStrip.SuspendLayout();
@@ -141,9 +126,7 @@ partial class MainForm
 
         // 파일 메뉴
         tsmiFile.DropDownItems.AddRange([tsmiFileNewWindow, tsmiFileSep1, tsmiFileExit]);
-        tsmiFile.Name = "tsmiFile";
-        tsmiFile.Text = "파일(&F)";
-
+        tsmiFile.Name = "tsmiFile"; tsmiFile.Text = "파일(&F)";
         tsmiFileNewWindow.Name = "tsmiFileNewWindow"; tsmiFileNewWindow.Text = "새 창(&N)";
         tsmiFileNewWindow.ShortcutKeys = Keys.Control | Keys.N;
         tsmiFileSep1.Name = "tsmiFileSep1";
@@ -151,22 +134,13 @@ partial class MainForm
         tsmiFileExit.ShortcutKeys = Keys.Alt | Keys.F4;
 
         // 보기 메뉴
-        tsmiView.DropDownItems.AddRange([
-            tsmiViewDark, tsmiViewSnippet, tsmiViewFolderTree,
-            tsmiViewSep1, tsmiViewAutoCol]);
+        tsmiView.DropDownItems.AddRange([tsmiViewDark, tsmiViewSnippet, tsmiViewSep1, tsmiViewAutoCol]);
         tsmiView.Name = "tsmiView"; tsmiView.Text = "보기(&V)";
-
         tsmiViewDark.Name = "tsmiViewDark"; tsmiViewDark.Text = "다크 모드(&D)";
         tsmiViewDark.CheckOnClick = true; tsmiViewDark.ShortcutKeys = Keys.Control | Keys.D;
-
         tsmiViewSnippet.Name = "tsmiViewSnippet"; tsmiViewSnippet.Text = "미리보기 패널(&P)";
         tsmiViewSnippet.CheckOnClick = true; tsmiViewSnippet.Checked = true;
         tsmiViewSnippet.ShortcutKeys = Keys.Control | Keys.P;
-
-        tsmiViewFolderTree.Name = "tsmiViewFolderTree"; tsmiViewFolderTree.Text = "폴더 트리(&F)";
-        tsmiViewFolderTree.CheckOnClick = true; tsmiViewFolderTree.Checked = true;
-        tsmiViewFolderTree.ShortcutKeys = Keys.Control | Keys.T;
-
         tsmiViewSep1.Name = "tsmiViewSep1";
         tsmiViewAutoCol.Name = "tsmiViewAutoCol"; tsmiViewAutoCol.Text = "열 너비 자동 조정(&A)";
         tsmiViewAutoCol.ShortcutKeys = Keys.Control | Keys.Add;
@@ -174,7 +148,6 @@ partial class MainForm
         // 검색 메뉴
         tsmiSearch.DropDownItems.AddRange([tsmiSearchContent, tsmiSearchSep1, tsmiSearchClear]);
         tsmiSearch.Name = "tsmiSearch"; tsmiSearch.Text = "검색(&S)";
-
         tsmiSearchContent.Name = "tsmiSearchContent"; tsmiSearchContent.Text = "파일 내용 검색(&C)";
         tsmiSearchContent.CheckOnClick = true; tsmiSearchContent.ShortcutKeys = Keys.F4;
         tsmiSearchSep1.Name = "tsmiSearchSep1";
@@ -187,7 +160,6 @@ partial class MainForm
             tsmiToolsReindex, tsmiToolsContent,
             tsmiToolsSep2, tsmiToolsVacuum]);
         tsmiTools.Name = "tsmiTools"; tsmiTools.Text = "도구(&T)";
-
         tsmiToolsIndex.Name = "tsmiToolsIndex"; tsmiToolsIndex.Text = "인덱스 설정(&I)…";
         tsmiToolsIndex.ShortcutKeys = Keys.Control | Keys.Shift | Keys.I;
         tsmiToolsSep1.Name = "tsmiToolsSep1";
@@ -204,28 +176,15 @@ partial class MainForm
         tsmiHelpAbout.Name = "tsmiHelpAbout"; tsmiHelpAbout.Text = "SFM 정보(&A)…";
 
         // ═════════════════════════════════════════════════════════
-        // 폴더 패널 토글 버튼 (btnFolderPanel) — 이전 cmbLocation 자리
-        // ═════════════════════════════════════════════════════════
-        btnFolderPanel.Dock                              = DockStyle.Fill;
-        btnFolderPanel.FlatStyle                         = FlatStyle.Flat;
-        btnFolderPanel.FlatAppearance.BorderColor        = Color.FromArgb(180, 180, 180);
-        btnFolderPanel.Font                              = new Font("Segoe UI", 9F);
-        btnFolderPanel.Margin                            = new Padding(0, 0, 4, 0);
-        btnFolderPanel.Name                              = "btnFolderPanel";
-        btnFolderPanel.TabIndex                          = 1;
-        btnFolderPanel.Text                              = "📂 모든 위치";
-        btnFolderPanel.TextAlign                         = ContentAlignment.MiddleLeft;
-
-        // ═════════════════════════════════════════════════════════
         // 검색창 (txtSearch)
         // ═════════════════════════════════════════════════════════
         txtSearch.Anchor          = AnchorStyles.Left | AnchorStyles.Right;
         txtSearch.BorderStyle     = BorderStyle.FixedSingle;
         txtSearch.Font            = new Font("Segoe UI", 11F);
-        txtSearch.Margin          = new Padding(0, 0, 0, 0);
+        txtSearch.Margin          = new Padding(0);
         txtSearch.Name            = "txtSearch";
         txtSearch.PlaceholderText = "검색어를 입력하세요…";
-        txtSearch.TabIndex        = 2;
+        txtSearch.TabIndex        = 1;
 
         // ═════════════════════════════════════════════════════════
         // 지우기 버튼 (btnClear)
@@ -250,14 +209,13 @@ partial class MainForm
         btnSearch.Font                       = new Font("Segoe UI", 9.5F, FontStyle.Bold);
         btnSearch.Margin                     = new Padding(0);
         btnSearch.Name                       = "btnSearch";
-        btnSearch.TabIndex                   = 3;
+        btnSearch.TabIndex                   = 2;
         btnSearch.Text                       = "검색";
 
         // ═════════════════════════════════════════════════════════
-        // 툴바 TableLayoutPanel
+        // 툴바 TableLayoutPanel (3열: [검색창 Fill] [✕ 32px] [검색 78px])
         // ═════════════════════════════════════════════════════════
-        tblToolbar.ColumnCount = 4;
-        tblToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110F)); // 폴더 토글
+        tblToolbar.ColumnCount = 3;
         tblToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));  // 검색창
         tblToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 32F));  // 지우기
         tblToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 78F));  // 검색버튼
@@ -265,17 +223,16 @@ partial class MainForm
         tblToolbar.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         tblToolbar.Dock    = DockStyle.Fill;
         tblToolbar.Name    = "tblToolbar";
-        tblToolbar.Padding = new Padding(4, 7, 6, 7);
-        tblToolbar.Controls.Add(btnFolderPanel, 0, 0);
-        tblToolbar.Controls.Add(txtSearch,      1, 0);
-        tblToolbar.Controls.Add(btnClear,       2, 0);
-        tblToolbar.Controls.Add(btnSearch,      3, 0);
+        tblToolbar.Padding = new Padding(6, 7, 6, 7);
+        tblToolbar.Controls.Add(txtSearch, 0, 0);
+        tblToolbar.Controls.Add(btnClear,  1, 0);
+        tblToolbar.Controls.Add(btnSearch, 2, 0);
 
         // ═════════════════════════════════════════════════════════
         // 옵션 패널
         // ═════════════════════════════════════════════════════════
         chkContent.AutoSize = true; chkContent.Location = new Point(6, 5);
-        chkContent.Name = "chkContent"; chkContent.Text = "내용 검색 (F4)"; chkContent.TabIndex = 4;
+        chkContent.Name = "chkContent"; chkContent.Text = "내용 검색 (F4)"; chkContent.TabIndex = 3;
 
         lblTypeSep.AutoSize = false; lblTypeSep.Location = new Point(116, 3);
         lblTypeSep.Size = new Size(2, 20); lblTypeSep.Name = "lblTypeSep";
@@ -285,16 +242,16 @@ partial class MainForm
         lblFilter.Name = "lblFilter"; lblFilter.Text = "유형:";
 
         chkTypeDoc.AutoSize = true; chkTypeDoc.Location = new Point(162, 5);
-        chkTypeDoc.Name = "chkTypeDoc"; chkTypeDoc.Text = "문서"; chkTypeDoc.TabIndex = 5;
+        chkTypeDoc.Name = "chkTypeDoc"; chkTypeDoc.Text = "문서"; chkTypeDoc.TabIndex = 4;
 
         chkTypePdf.AutoSize = true; chkTypePdf.Location = new Point(228, 5);
-        chkTypePdf.Name = "chkTypePdf"; chkTypePdf.Text = "PDF"; chkTypePdf.TabIndex = 6;
+        chkTypePdf.Name = "chkTypePdf"; chkTypePdf.Text = "PDF"; chkTypePdf.TabIndex = 5;
 
         chkTypeImage.AutoSize = true; chkTypeImage.Location = new Point(292, 5);
-        chkTypeImage.Name = "chkTypeImage"; chkTypeImage.Text = "이미지"; chkTypeImage.TabIndex = 7;
+        chkTypeImage.Name = "chkTypeImage"; chkTypeImage.Text = "이미지"; chkTypeImage.TabIndex = 6;
 
         chkTypeCode.AutoSize = true; chkTypeCode.Location = new Point(368, 5);
-        chkTypeCode.Name = "chkTypeCode"; chkTypeCode.Text = "소스코드"; chkTypeCode.TabIndex = 8;
+        chkTypeCode.Name = "chkTypeCode"; chkTypeCode.Text = "소스코드"; chkTypeCode.TabIndex = 7;
 
         lblDbInfo.AutoSize = false; lblDbInfo.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         lblDbInfo.TextAlign = ContentAlignment.MiddleRight; lblDbInfo.Location = new Point(700, 4);
@@ -314,61 +271,11 @@ partial class MainForm
         pnlSearch.Dock = DockStyle.Top; pnlSearch.Height = 74; pnlSearch.Name = "pnlSearch";
 
         // ═════════════════════════════════════════════════════════
-        // 폴더 트리 헤더 (pnlTreeHeader)
-        // ═════════════════════════════════════════════════════════
-        lblTreeTitle.AutoSize  = true;
-        lblTreeTitle.Location  = new Point(6, 6);
-        lblTreeTitle.Name      = "lblTreeTitle";
-        lblTreeTitle.Text      = "검색 위치";
-        lblTreeTitle.Font      = new Font("Segoe UI", 9F, FontStyle.Bold);
-
-        btnClearTree.Anchor    = AnchorStyles.Top | AnchorStyles.Right;
-        btnClearTree.FlatStyle = FlatStyle.Flat;
-        btnClearTree.FlatAppearance.BorderSize = 0;
-        btnClearTree.Font      = new Font("Segoe UI", 8F);
-        btnClearTree.Location  = new Point(154, 3);
-        btnClearTree.Size      = new Size(52, 20);
-        btnClearTree.Name      = "btnClearTree";
-        btnClearTree.Text      = "전체 해제";
-        btnClearTree.TabStop   = false;
-
-        pnlTreeHeader.Controls.AddRange([lblTreeTitle, btnClearTree]);
-        pnlTreeHeader.Dock      = DockStyle.Top;
-        pnlTreeHeader.Height    = 28;
-        pnlTreeHeader.Name      = "pnlTreeHeader";
-        pnlTreeHeader.Padding   = new Padding(2, 0, 2, 0);
-
-        // ═════════════════════════════════════════════════════════
-        // 폴더 TreeView (tvFolders)
-        // ═════════════════════════════════════════════════════════
-        imgListTree.ColorDepth       = ColorDepth.Depth32Bit;
-        imgListTree.ImageSize        = new Size(16, 16);
-        imgListTree.TransparentColor = Color.Transparent;
-
-        tvFolders.CheckBoxes       = true;
-        tvFolders.Dock             = DockStyle.Fill;
-        tvFolders.FullRowSelect    = true;
-        tvFolders.HideSelection    = false;
-        tvFolders.ImageList        = imgListTree;
-        tvFolders.Indent           = 16;
-        tvFolders.ItemHeight       = 20;
-        tvFolders.Name             = "tvFolders";
-        tvFolders.Scrollable       = true;
-        tvFolders.ShowLines        = true;
-        tvFolders.ShowNodeToolTips = true;
-        tvFolders.ShowPlusMinus    = true;
-        tvFolders.ShowRootLines    = true;
-        tvFolders.BorderStyle      = BorderStyle.None;
-
-        // SplitContainer Panel1: 폴더 트리
-        splitMain.Panel1.Controls.Add(tvFolders);
-        splitMain.Panel1.Controls.Add(pnlTreeHeader);
-
-        // ═════════════════════════════════════════════════════════
-        // 스니펫 패널 (Panel2 내부)
+        // 스니펫 패널
         // ═════════════════════════════════════════════════════════
         lblSnippetIcon.AutoSize = false; lblSnippetIcon.Location = new Point(4, 3);
-        lblSnippetIcon.Size = new Size(20, 18); lblSnippetIcon.Text = "📄"; lblSnippetIcon.Name = "lblSnippetIcon";
+        lblSnippetIcon.Size = new Size(20, 18); lblSnippetIcon.Text = "📄";
+        lblSnippetIcon.Name = "lblSnippetIcon";
 
         lblSnippetPath.AutoSize = false;
         lblSnippetPath.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -400,11 +307,11 @@ partial class MainForm
         // ═════════════════════════════════════════════════════════
         // ListView
         // ═════════════════════════════════════════════════════════
-        colFileName.Text = "이름";   colFileName.Width = 240;
-        colPath.Text     = "경로";   colPath.Width     = 340;
+        colFileName.Text = "이름";    colFileName.Width = 260;
+        colPath.Text     = "경로";    colPath.Width     = 400;
         colSize.Text     = "파일 크기"; colSize.TextAlign = HorizontalAlignment.Right; colSize.Width = 90;
         colModified.Text = "수정 날짜"; colModified.Width = 145;
-        colMatch.Text    = "유형";   colMatch.Width    = 80;
+        colMatch.Text    = "유형";    colMatch.Width    = 80;
 
         listResults.Columns.AddRange([colFileName, colPath, colSize, colModified, colMatch]);
         listResults.ContextMenuStrip = cmsResult;
@@ -420,23 +327,6 @@ partial class MainForm
         imgListSmall.ColorDepth = ColorDepth.Depth32Bit;
         imgListSmall.ImageSize  = new Size(16, 16);
         imgListSmall.TransparentColor = Color.Transparent;
-
-        // SplitContainer Panel2: 결과 목록 + 스니펫
-        splitMain.Panel2.Controls.Add(listResults);
-        splitMain.Panel2.Controls.Add(pnlSnippet);
-
-        // ═════════════════════════════════════════════════════════
-        // SplitContainer (splitMain)
-        // ═════════════════════════════════════════════════════════
-        splitMain.Dock             = DockStyle.Fill;
-        splitMain.FixedPanel       = FixedPanel.Panel1;
-        splitMain.Name             = "splitMain";
-        splitMain.Orientation      = Orientation.Vertical;
-        // Panel1MinSize / Panel2MinSize / SplitterDistance 는 Load 이벤트에서 설정.
-        // InitializeComponent 시점에 Width=0 이므로 EndInit() 내부에서
-        // ApplyPanel2MinSize → set_SplitterDistance 가 호출될 때 제약 위반 오류 발생.
-        splitMain.SplitterWidth    = 5;
-        splitMain.TabIndex         = 1;
 
         // ═════════════════════════════════════════════════════════
         // StatusStrip
@@ -455,7 +345,7 @@ partial class MainForm
         sslLastIndexed.Text = string.Empty; sslLastIndexed.Padding = new Padding(0, 0, 4, 0);
 
         statusStrip.Items.AddRange([sslResultCount, sslIndexStatus, sslDbStats, sslLastIndexed]);
-        statusStrip.Name = "statusStrip"; statusStrip.SizingGrip = true; statusStrip.TabIndex = 6;
+        statusStrip.Name = "statusStrip"; statusStrip.SizingGrip = true; statusStrip.TabIndex = 5;
 
         // ═════════════════════════════════════════════════════════
         // ContextMenuStrip
@@ -509,11 +399,12 @@ partial class MainForm
         StartPosition       = FormStartPosition.CenterScreen;
         Text                = "SFM — Smart File Manager";
 
-        // 도킹 순서: Fill → Bottom → Top(역순)
-        Controls.Add(splitMain);    // Fill
-        Controls.Add(pnlSearch);    // Top
-        Controls.Add(menuStrip);    // Top (최상단)
-        Controls.Add(statusStrip);  // Bottom
+        // 도킹 순서 (나중에 추가된 컨트롤이 먼저 도킹됨)
+        Controls.Add(listResults);   // Fill — 먼저 추가, 마지막 처리
+        Controls.Add(pnlSnippet);    // Bottom
+        Controls.Add(pnlSearch);     // Top
+        Controls.Add(menuStrip);     // Top (최상단)
+        Controls.Add(statusStrip);   // Bottom (맨 아래)
 
         // ─────────────────────────────────────────────────────────
         menuStrip.ResumeLayout(false);
@@ -521,13 +412,8 @@ partial class MainForm
         tblToolbar.ResumeLayout(false);
         pnlSearch.ResumeLayout(false);
         pnlOptions.ResumeLayout(false);
-        pnlTreeHeader.ResumeLayout(false);
         pnlSnippet.ResumeLayout(false);
         pnlSnippetBar.ResumeLayout(false);
-        splitMain.Panel1.ResumeLayout(false);
-        splitMain.Panel2.ResumeLayout(false);
-        splitMain.EndInit();
-        splitMain.ResumeLayout(false);
         statusStrip.ResumeLayout(false);
         statusStrip.PerformLayout();
         ResumeLayout(false);
@@ -543,7 +429,6 @@ partial class MainForm
     private ToolStripMenuItem    tsmiView            = null!;
     private ToolStripMenuItem    tsmiViewDark        = null!;
     private ToolStripMenuItem    tsmiViewSnippet     = null!;
-    private ToolStripMenuItem    tsmiViewFolderTree  = null!;
     private ToolStripSeparator   tsmiViewSep1        = null!;
     private ToolStripMenuItem    tsmiViewAutoCol     = null!;
     private ToolStripMenuItem    tsmiSearch          = null!;
@@ -562,7 +447,6 @@ partial class MainForm
 
     private Panel                pnlSearch           = null!;
     private TableLayoutPanel     tblToolbar          = null!;
-    private Button               btnFolderPanel      = null!;
     private TextBox              txtSearch           = null!;
     private Button               btnClear            = null!;
     private Button               btnSearch           = null!;
@@ -576,13 +460,6 @@ partial class MainForm
     private CheckBox             chkTypeImage        = null!;
     private CheckBox             chkTypeCode         = null!;
     private Label                lblDbInfo           = null!;
-
-    private SplitContainer       splitMain           = null!;
-    private Panel                pnlTreeHeader       = null!;
-    private Label                lblTreeTitle        = null!;
-    private Button               btnClearTree        = null!;
-    private TreeView             tvFolders           = null!;
-    private ImageList            imgListTree         = null!;
 
     private Panel                pnlSnippet          = null!;
     private Panel                pnlSnippetBar       = null!;
