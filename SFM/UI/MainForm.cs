@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using SFM.Core;
 using SFM.Data;
@@ -45,16 +46,9 @@ public partial class MainForm : Form
                                                   ".go",".rs",".rb",".php",".swift",".kt",
                                                   ".html",".htm",".css",".scss",".sql",".sh",".bat",".ps1"];
 
-    private static readonly Dictionary<string, int> ExtImageIndex =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            {".docx",1},{".doc",1},{".xlsx",1},{".xls",1},{".pptx",1},{".ppt",1},
-            {".txt",1},{".md",1},{".rtf",1},{".pdf",2},
-            {".jpg",3},{".jpeg",3},{".png",3},{".gif",3},{".bmp",3},{".svg",3},{".webp",3},{".ico",3},
-            {".cs",4},{".py",4},{".js",4},{".ts",4},{".java",4},{".cpp",4},{".c",4},{".h",4},
-            {".go",4},{".rs",4},{".rb",4},{".php",4},{".swift",4},{".kt",4},
-            {".html",4},{".htm",4},{".css",4},{".scss",4},{".sql",4},{".sh",4},{".bat",4},{".ps1",4},
-        };
+    // 확장자 → imgListSmall 인덱스 (Windows 셸 아이콘 캐시)
+    private readonly Dictionary<string, int> _shellIconCache =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private string[] GetSelectedExtensions()
     {
@@ -72,6 +66,7 @@ public partial class MainForm : Form
     public MainForm()
     {
         InitializeComponent();
+        Icon = CreateAppIcon();
 
         _settings = AppSettings.Load();
         _db       = new DatabaseManager(_settings.DatabasePath);
@@ -136,46 +131,87 @@ public partial class MainForm : Form
     }
 
     // ─────────────────────────────────────────────────────────
-    // 이미지 리스트 초기화 (파일 아이콘 + 트리 아이콘)
+    // 이미지 리스트 — Windows 셸 아이콘 사용
     // ─────────────────────────────────────────────────────────
     private void InitImageList()
     {
-        // 파일 목록 아이콘 (imgListSmall)
-        Color[] palette =
-        [
-            Color.FromArgb(130, 130, 130),
-            Color.FromArgb( 60, 120, 200),
-            Color.FromArgb(200,  60,  60),
-            Color.FromArgb(140,  70, 200),
-            Color.FromArgb( 50, 160,  90),
-        ];
-        foreach (var clr in palette)
-            imgListSmall.Images.Add(MakeFileIcon(clr));
+        // index 0 : 알 수 없는 파일 대표 아이콘 (폴백)
+        GetShellIconIndex(null);
     }
 
-    private static Bitmap MakeFileIcon(Color color)
+    /// <summary>
+    /// 확장자에 해당하는 Windows 셸 아이콘을 imgListSmall 에 추가하고
+    /// 인덱스를 반환한다. 같은 확장자는 캐시에서 즉시 반환.
+    /// </summary>
+    private int GetShellIconIndex(string? ext)
     {
-        var bmp = new Bitmap(16, 16);
-        using var g    = Graphics.FromImage(bmp);
-        using var fill = new SolidBrush(color);
-        using var pen  = new Pen(Color.FromArgb(80, Color.Black));
-        using var line = new Pen(Color.FromArgb(90, Color.White), 1f);
+        // null / 빈 확장자는 ".*" 일반 파일 아이콘으로 통일
+        var key = string.IsNullOrEmpty(ext) ? ".*" : ext;
+        if (_shellIconCache.TryGetValue(key, out var cached)) return cached;
+
+        int idx = 0; // 폴백
+        try
+        {
+            var sfi      = new NativeSHFILEINFO();
+            var dummyPath = "file" + (key == ".*" ? ".dat" : key);
+            NativeMethods.SHGetFileInfo(
+                dummyPath,
+                NativeMethods.FILE_ATTRIBUTE_NORMAL,
+                ref sfi,
+                Marshal.SizeOf<NativeSHFILEINFO>(),
+                NativeMethods.SHGFI_ICON | NativeMethods.SHGFI_SMALLICON
+                    | NativeMethods.SHGFI_USEFILEATTRIBUTES);
+
+            if (sfi.hIcon != IntPtr.Zero)
+            {
+                try
+                {
+                    // Icon.FromHandle 은 HICON 소유권을 갖지 않으므로 Clone 후 직접 해제
+                    using var tmpIcon = Icon.FromHandle(sfi.hIcon);
+                    using var bmp     = tmpIcon.ToBitmap();
+                    imgListSmall.Images.Add(bmp);
+                    idx = imgListSmall.Images.Count - 1;
+                }
+                finally { NativeMethods.DestroyIcon(sfi.hIcon); }
+            }
+        }
+        catch { /* 아이콘 로드 실패 → idx=0 폴백 유지 */ }
+
+        _shellIconCache[key] = idx;
+        return idx;
+    }
+
+    // ── 프로그램 아이콘 (돋보기 모양) ───────────────────────────
+    private static Icon CreateAppIcon()
+    {
+        using var bmp = new Bitmap(32, 32);
+        using var g   = Graphics.FromImage(bmp);
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         g.Clear(Color.Transparent);
-        using var path = new System.Drawing.Drawing2D.GraphicsPath();
-        path.AddLines(new PointF[] { new(2,1), new(10,1), new(13,4), new(13,14), new(2,14), new(2,1) });
-        g.FillPath(fill, path);
-        g.DrawPath(pen, path);
-        using var fold = new SolidBrush(Color.FromArgb(60, Color.White));
-        g.FillPolygon(fold, new PointF[] { new(10,1), new(13,4), new(10,4) });
-        g.DrawLine(line, 4, 7, 11, 7);
-        g.DrawLine(line, 4, 9, 11, 9);
-        g.DrawLine(line, 4, 11, 9, 11);
-        return bmp;
-    }
 
-    private static int GetImageIndex(string? ext) =>
-        !string.IsNullOrEmpty(ext) && ExtImageIndex.TryGetValue(ext, out var idx) ? idx : 0;
+        // 렌즈 배경
+        using var lensBack = new SolidBrush(Color.FromArgb(210, 232, 255));
+        g.FillEllipse(lensBack, 2, 2, 19, 19);
+
+        // 렌즈 테두리
+        using var lensPen = new Pen(Color.FromArgb(0, 102, 204), 2.5f);
+        g.DrawEllipse(lensPen, 2, 2, 19, 19);
+
+        // 손잡이
+        using var handlePen = new Pen(Color.FromArgb(0, 102, 204), 3.5f);
+        handlePen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
+        handlePen.EndCap   = System.Drawing.Drawing2D.LineCap.Round;
+        g.DrawLine(handlePen, 18, 18, 28, 28);
+
+        // 렌즈 내부 하이라이트
+        using var hl = new Pen(Color.FromArgb(120, Color.White), 1.5f);
+        g.DrawArc(hl, 5, 5, 9, 9, 200, 120);
+
+        var hIcon = bmp.GetHicon();
+        var icon  = (Icon)Icon.FromHandle(hIcon).Clone();
+        NativeMethods.DestroyIcon(hIcon);
+        return icon;
+    }
 
     // ─────────────────────────────────────────────────────────
     // 페이지네이션
@@ -236,22 +272,18 @@ public partial class MainForm : Form
         cmsResult.Opening += (_, e) =>
         {
             bool hasSel = listResults.SelectedIndices.Count > 0, hasRes = _results.Count > 0;
-            tsmiOpenFile.Enabled = tsmiOpenFolder.Enabled = tsmiMoveFile.Enabled =
+            tsmiOpenFile.Enabled = tsmiOpenFolder.Enabled =
                 tsmiDeleteFile.Enabled = tsmiProperties.Enabled =
                 tsmiCopyPath.Enabled = tsmiCopyDir.Enabled =
                 tsmiCopyName.Enabled = tsmiDeleteFromIndex.Enabled = hasSel;
-            tsmiSelectAll.Enabled = tsmiInvertSelect.Enabled = tsmiSaveAsText.Enabled = hasRes;
-            tsmiSelectNone.Enabled = hasSel;
+            tsmiSelectAll.Enabled = tsmiSaveAsText.Enabled = hasRes;
             if (!hasRes) e.Cancel = true;
         };
         tsmiOpenFile.Click        += (_, _) => OpenSelectedFile();
         tsmiOpenFolder.Click      += (_, _) => OpenSelectedFolder();
-        tsmiMoveFile.Click        += (_, _) => MoveSelectedFiles();
         tsmiDeleteFile.Click      += (_, _) => DeleteSelectedFiles();
         tsmiProperties.Click      += (_, _) => ShowProperties();
         tsmiSelectAll.Click       += (_, _) => SelectAll();
-        tsmiSelectNone.Click      += (_, _) => listResults.SelectedIndices.Clear();
-        tsmiInvertSelect.Click    += (_, _) => InvertSelection();
         tsmiCopyPath.Click        += (_, _) => CopySelectedPaths();
         tsmiCopyDir.Click         += (_, _) => CopySelectedDirs();
         tsmiCopyName.Click        += (_, _) => CopySelectedNames();
@@ -400,7 +432,7 @@ public partial class MainForm : Form
 
     private ListViewItem CreateListViewItem(SearchResult r)
     {
-        var lvi = new ListViewItem(r.FileName, GetImageIndex(r.Extension));
+        var lvi = new ListViewItem(r.FileName, GetShellIconIndex(r.Extension));
         lvi.SubItems.Add(Path.GetDirectoryName(r.FilePath) ?? r.FilePath);
         lvi.SubItems.Add(FormatSize(r.FileSize));
         lvi.SubItems.Add(r.ModifiedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
@@ -452,7 +484,7 @@ public partial class MainForm : Form
     private void UpdateSnippetPanel(SearchResult? r)
     {
         if (r is null) { lblSnippetPath.Text = "항목을 선택하면 미리보기가 표시됩니다"; rtbSnippet.Clear(); return; }
-        lblSnippetPath.Text = r.FilePath;
+        lblSnippetPath.Text = r.FileName;   // 경로 제외, 파일명만 표시
         rtbSnippet.Clear();
         if (!string.IsNullOrWhiteSpace(r.Snippet))
         {
@@ -531,10 +563,9 @@ public partial class MainForm : Form
                 ? $"검색 완료.  결과 없음.  경과 시간: {elapsed:F3} 초"
                 : $"검색 완료.  {_results.Count:N0} 파일/폴더 발견.  경과 시간: {elapsed:F3} 초";
 
-            Text = _results.Count > 0 ? $"SFM — \"{keyword}\" ({_results.Count:N0}개)" : "SFM — Smart File Manager";
             if (_results.Count > 0)
             {
-                AutoResizeColumns();   // 결과마다 열 너비 자동 조정
+                AutoResizeColumns();
                 if (!splitPreview.Panel2Collapsed) UpdateSnippetPanel(_results[0]);
             }
         }
@@ -567,7 +598,26 @@ public partial class MainForm : Form
                 if (_recentBox.Items.Count > 0) _recentBox.SelectedIndex = 0;
                 e.Handled = true; break;
             case Keys.Escape:
-                if (_recentBox.Visible) _recentBox.Visible = false; else txtSearch.Clear();
+                if (_recentBox.Visible)
+                {
+                    _recentBox.Visible = false;              // 최근 목록 닫기
+                }
+                else if (txtSearch.Text.Length > 0)
+                {
+                    txtSearch.Clear();                       // 1st ESC: 검색어 지우기
+                }
+                else
+                {
+                    // 2nd ESC (검색어 이미 비어 있음): 결과 전체 초기화
+                    _debounceTimer.Stop();
+                    _results = []; _currentPage = 0; _lastKeyword = string.Empty;
+                    listResults.VirtualListSize = 0;
+                    sslResultCount.Text = "준비";
+                    _sslPrevPage.Enabled = _sslNextPage.Enabled = false;
+                    ResetSortHeaders();
+                    UpdateSnippetPanel(null);
+                }
+                txtSearch.Focus();
                 e.Handled = true; break;
             case Keys.Enter:
                 _debounceTimer.Stop(); _ = RunSearchAsync(); e.Handled = true; break;

@@ -83,13 +83,10 @@ partial class MainForm
         tsmiOpenFile        = new ToolStripMenuItem();
         tsmiOpenFolder      = new ToolStripMenuItem();
         tsmiSep1            = new ToolStripSeparator();
-        tsmiMoveFile        = new ToolStripMenuItem();
         tsmiDeleteFile      = new ToolStripMenuItem();
         tsmiProperties      = new ToolStripMenuItem();
         tsmiSep2            = new ToolStripSeparator();
         tsmiSelectAll       = new ToolStripMenuItem();
-        tsmiSelectNone      = new ToolStripMenuItem();
-        tsmiInvertSelect    = new ToolStripMenuItem();
         tsmiSep3            = new ToolStripSeparator();
         tsmiCopyPath        = new ToolStripMenuItem();
         tsmiCopyDir         = new ToolStripMenuItem();
@@ -187,10 +184,10 @@ partial class MainForm
         // ═════════════════════════════════════════════════════════
         txtSearch.Anchor          = AnchorStyles.Left | AnchorStyles.Right;
         txtSearch.BorderStyle     = BorderStyle.FixedSingle;
-        txtSearch.Font            = new Font("Segoe UI", 11F);
+        txtSearch.Font            = new Font("Segoe UI", 10F);
         txtSearch.Margin          = new Padding(0);
         txtSearch.Name            = "txtSearch";
-        txtSearch.PlaceholderText = "검색어를 입력하세요…";
+        txtSearch.PlaceholderText = "검색어(2자이상)를 입력하세요...^.^";
         txtSearch.TabIndex        = 1;
 
         // ═════════════════════════════════════════════════════════
@@ -378,7 +375,6 @@ partial class MainForm
         tsmiOpenFolder.Name = "tsmiOpenFolder"; tsmiOpenFolder.Text = "폴더 열기(&E)";
         tsmiSep1.Name = "tsmiSep1";
 
-        tsmiMoveFile.Name = "tsmiMoveFile"; tsmiMoveFile.Text = "이동하기(&M)…";
         tsmiDeleteFile.Name = "tsmiDeleteFile"; tsmiDeleteFile.Text = "파일/폴더 삭제(&X)";
         tsmiDeleteFile.ForeColor = Color.FromArgb(180, 0, 0);
         tsmiProperties.Name = "tsmiProperties"; tsmiProperties.Text = "속성(&R)";
@@ -386,8 +382,6 @@ partial class MainForm
 
         tsmiSelectAll.Name = "tsmiSelectAll"; tsmiSelectAll.Text = "모든 항목 선택(&A)";
         tsmiSelectAll.ShortcutKeyDisplayString = "Ctrl+A";
-        tsmiSelectNone.Name = "tsmiSelectNone"; tsmiSelectNone.Text = "선택 없음(&N)";
-        tsmiInvertSelect.Name = "tsmiInvertSelect"; tsmiInvertSelect.Text = "선택 반전(&I)";
         tsmiSep3.Name = "tsmiSep3";
 
         tsmiCopyPath.Name = "tsmiCopyPath"; tsmiCopyPath.Text = "전체 경로 복사(&C)";
@@ -401,8 +395,8 @@ partial class MainForm
 
         cmsResult.Items.AddRange([
             tsmiOpenFile, tsmiOpenFolder, tsmiSep1,
-            tsmiMoveFile, tsmiDeleteFile, tsmiProperties, tsmiSep2,
-            tsmiSelectAll, tsmiSelectNone, tsmiInvertSelect, tsmiSep3,
+            tsmiDeleteFile, tsmiProperties, tsmiSep2,
+            tsmiSelectAll, tsmiSep3,
             tsmiCopyPath, tsmiCopyDir, tsmiCopyName, tsmiSaveAsText, tsmiSep4,
             tsmiDeleteFromIndex]);
         cmsResult.Name = "cmsResult";
@@ -505,13 +499,10 @@ partial class MainForm
     private ToolStripMenuItem    tsmiOpenFile        = null!;
     private ToolStripMenuItem    tsmiOpenFolder      = null!;
     private ToolStripSeparator   tsmiSep1            = null!;
-    private ToolStripMenuItem    tsmiMoveFile        = null!;
     private ToolStripMenuItem    tsmiDeleteFile      = null!;
     private ToolStripMenuItem    tsmiProperties      = null!;
     private ToolStripSeparator   tsmiSep2            = null!;
     private ToolStripMenuItem    tsmiSelectAll       = null!;
-    private ToolStripMenuItem    tsmiSelectNone      = null!;
-    private ToolStripMenuItem    tsmiInvertSelect    = null!;
     private ToolStripSeparator   tsmiSep3            = null!;
     private ToolStripMenuItem    tsmiCopyPath        = null!;
     private ToolStripMenuItem    tsmiCopyDir         = null!;
