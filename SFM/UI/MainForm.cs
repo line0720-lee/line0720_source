@@ -167,7 +167,12 @@ public partial class MainForm : Form
     private void WireEvents()
     {
         // ── 검색창 ───────────────────────────────────────────
-        txtSearch.TextChanged += (_, _) => { _debounceTimer.Stop(); _debounceTimer.Start(); };
+        txtSearch.TextChanged += (_, _) =>
+        {
+            _recentBox.Visible = false;   // 타이핑 시작하면 드롭다운 닫기
+            _debounceTimer.Stop();
+            _debounceTimer.Start();
+        };
         txtSearch.Enter       += OnSearchBoxEnter;
         txtSearch.Leave       += OnSearchBoxLeave;
         txtSearch.KeyDown     += OnSearchBoxKeyDown;
@@ -749,6 +754,19 @@ public partial class MainForm : Form
     {
         switch (keyData)
         {
+            // Enter — 검색창 포커스 시 즉시 검색 (MenuStrip·AcceptButton 우선 처리 전에 가로챔)
+            case Keys.Enter when txtSearch.Focused:
+                if (_recentBox.Visible)
+                {
+                    // 드롭다운에서 선택 항목이 있으면 해당 키워드로 검색
+                    if (_recentBox.SelectedItem is string sel)
+                        txtSearch.Text = sel;
+                    _recentBox.Visible = false;
+                }
+                _debounceTimer.Stop();
+                _ = RunSearchAsync();
+                return true;   // 이 키를 폼이 소비 → TextBox.KeyDown 으로 내려가지 않음
+
             // Ctrl+F — 검색창 포커스
             case Keys.Control | Keys.F:
                 txtSearch.Focus();
