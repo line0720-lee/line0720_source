@@ -31,18 +31,50 @@ public sealed class Searcher
         if (string.IsNullOrWhiteSpace(query.Keyword))
             return [];
 
-        var keyword      = query.Keyword.Trim();
-        bool hasChoSeong = KoreanUtil.HasChoSeong(keyword);
+        var keyword       = query.Keyword.Trim();
+        bool isWildcard   = HasWildcard(keyword);
+        bool hasChoSeong  = !isWildcard && KoreanUtil.HasChoSeong(keyword);
 
-        List<SearchResult> results = hasChoSeong
-            ? await SearchWithChoSeongAsync(keyword, query)
-            : await SearchRegularAsync(keyword, query);
+        List<SearchResult> results = isWildcard
+            ? await SearchWildcardAsync(keyword, query)
+            : hasChoSeong
+                ? await SearchWithChoSeongAsync(keyword, query)
+                : await SearchRegularAsync(keyword, query);
 
         // 검색 히스토리 저장 (fire-and-forget)
-        try { _db.SaveSearchHistory(keyword, query.SearchInContent && !hasChoSeong); }
+        try { _db.SaveSearchHistory(keyword, query.SearchInContent && !hasChoSeong && !isWildcard); }
         catch { /* 히스토리 저장 실패가 검색 결과에 영향 X */ }
 
         return results;
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // 와일드카드 검색  (* = 모든 문자열, ? = 단일 문자)
+    // ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// * / ? 와일드카드가 포함된 파일명 패턴 검색.
+    /// *  → LIKE %,  ? → LIKE _  로 변환 후 파일명 LIKE 검색만 수행한다.
+    /// </summary>
+    private async Task<List<SearchResult>> SearchWildcardAsync(
+        string keyword, SearchQuery query)
+    {
+        int dbOffset    = query.Page * query.MaxResults;
+        var likePattern = BuildWildcardLikePattern(keyword);
+
+        var nameHits = await Task.Run(() => _db.SearchByNameFiltered(
+            likePattern : likePattern,
+            extensions  : query.Extensions,
+            minSize     : query.MinSize,
+            maxSize     : query.MaxSize,
+            after       : query.ModifiedAfter,
+            before      : query.ModifiedBefore,
+            limit       : query.MaxResults,
+            offset      : dbOffset));
+
+        return Sort(
+            nameHits.Select(f => ToResult(f, string.Empty, matchedName: true, matchedContent: false)),
+            query.MaxResults);
     }
 
     // ─────────────────────────────────────────────────────────
@@ -188,6 +220,39 @@ public sealed class Searcher
     /// <summary>SQLite LIKE 특수문자(% _ \)를 이스케이프한다.</summary>
     private static string EscapeLike(string s) =>
         s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+
+    /// <summary>키워드에 와일드카드 문자(* 또는 ?)가 포함되어 있으면 true.</summary>
+    private static bool HasWildcard(string keyword) =>
+        keyword.Contains('*') || keyword.Contains('?');
+
+    /// <summary>
+    /// 와일드카드 패턴을 SQLite LIKE 패턴으로 변환한다.
+    ///   *  →  %  (0개 이상 임의 문자)
+    ///   ?  →  _  (정확히 1개 임의 문자)
+    ///   %, _, \ 는 이스케이프 처리
+    /// 패턴에 와일드카드가 없으면 양쪽에 % 를 붙인다 (하위 호환).
+    /// </summary>
+    private static string BuildWildcardLikePattern(string keyword)
+    {
+        var sb = new StringBuilder();
+        foreach (var c in keyword)
+        {
+            switch (c)
+            {
+                case '*':  sb.Append('%');    break;
+                case '?':  sb.Append('_');    break;
+                case '%':  sb.Append("\\%");  break;
+                case '_':  sb.Append("\\_");  break;
+                case '\\': sb.Append("\\\\"); break;
+                default:   sb.Append(c);      break;
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>미리보기 하이라이트용 — 와일드카드 문자(* ?)를 제거한 순수 키워드를 반환한다.</summary>
+    public static string StripWildcards(string keyword) =>
+        keyword.Replace("*", string.Empty).Replace("?", string.Empty).Trim();
 }
 
 // ═════════════════════════════════════════════════════════════

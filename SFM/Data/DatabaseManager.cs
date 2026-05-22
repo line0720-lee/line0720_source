@@ -64,6 +64,7 @@ public class DatabaseManager : IDisposable
 
         CreateSchema();
         MigrateToTrigramIfNeeded();   // unicode61 → trigram 자동 마이그레이션
+        Exec("PRAGMA optimize");      // 시작 시 쿼리 플래너 통계 갱신
     }
 
     /// <summary>
@@ -139,9 +140,9 @@ public class DatabaseManager : IDisposable
         Exec("PRAGMA synchronous        = NORMAL");
         Exec("PRAGMA foreign_keys       = ON");
         Exec("PRAGMA temp_store         = MEMORY");
-        Exec("PRAGMA cache_size         = -20480");    // 20 MB 캐시 (음수 = KB 단위)
-        Exec("PRAGMA mmap_size          = 268435456"); // 256 MB 메모리맵 I/O (읽기 집약 최적화)
-        Exec("PRAGMA wal_autocheckpoint = 1000");      // WAL 1000페이지마다 자동 체크포인트
+        Exec("PRAGMA cache_size         = -131072");   // 128 MB 캐시 (음수 = KB 단위) — 대용량 DB 반복 쿼리 가속
+        Exec("PRAGMA mmap_size          = 536870912"); // 512 MB 메모리맵 I/O — 읽기 집약 최적화
+        Exec("PRAGMA wal_autocheckpoint = 4000");      // WAL 4000페이지마다 체크포인트 — 검색 중 I/O 감소
     }
 
     private void CreateSchema()
@@ -161,10 +162,18 @@ public class DatabaseManager : IDisposable
             )
             """);
 
+        // ── 단일 컬럼 인덱스 ─────────────────────────────────
         Exec("CREATE INDEX IF NOT EXISTS idx_fi_name      ON file_index (file_name)");
         Exec("CREATE INDEX IF NOT EXISTS idx_fi_extension ON file_index (extension)");
         Exec("CREATE INDEX IF NOT EXISTS idx_fi_modified  ON file_index (modified_at)");
         Exec("CREATE INDEX IF NOT EXISTS idx_fi_content   ON file_index (has_content)");
+        Exec("CREATE INDEX IF NOT EXISTS idx_fi_size      ON file_index (file_size)");  // 크기 범위 필터
+
+        // ── 복합 인덱스 (필터+정렬 조합 최적화) ─────────────
+        // 확장자 필터 후 최신 수정일 정렬 — SearchByNameFiltered / SearchByContentFiltered
+        Exec("CREATE INDEX IF NOT EXISTS idx_fi_ext_mod   ON file_index (extension, modified_at)");
+        // 수정일 범위 + 확장자 복합 필터 — GetRecentFiles / 날짜 기반 필터링
+        Exec("CREATE INDEX IF NOT EXISTS idx_fi_mod_ext   ON file_index (modified_at, extension)");
 
         // ── 2. FTS5 전문 검색 가상 테이블 ────────────────────
         // file_id: UNINDEXED → FTS 색인 제외(숫자 키), content: 전문 색인 대상
@@ -422,8 +431,15 @@ public class DatabaseManager : IDisposable
         }
     }
 
-    /// <summary>VACUUM 으로 DB 파일을 압축하여 삭제된 데이터 공간을 회수한다.</summary>
-    public void Vacuum() => Exec("VACUUM");
+    /// <summary>
+    /// VACUUM 으로 DB 파일을 압축하여 삭제된 데이터 공간을 회수한다.
+    /// 완료 후 PRAGMA optimize 로 쿼리 플래너 통계를 갱신한다.
+    /// </summary>
+    public void Vacuum()
+    {
+        Exec("VACUUM");
+        Exec("PRAGMA optimize");   // 인덱스 통계 갱신 → 쿼리 플래너 정확도 향상
+    }
 
     /// <summary>
     /// 배치 인덱싱을 위한 트랜잭션을 시작한다.

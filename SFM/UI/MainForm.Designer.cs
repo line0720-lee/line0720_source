@@ -89,7 +89,6 @@ partial class MainForm
         tsmiCopyPath        = new ToolStripMenuItem();
         tsmiCopyDir         = new ToolStripMenuItem();
         tsmiCopyName        = new ToolStripMenuItem();
-        tsmiSaveAsText      = new ToolStripMenuItem();
         tsmiSep4            = new ToolStripSeparator();
         tsmiDeleteFromIndex = new ToolStripMenuItem();
 
@@ -154,6 +153,7 @@ partial class MainForm
         tsmiViewSnippet.ShortcutKeys = Keys.Control | Keys.P;
         tsmiViewSep1.Name = "tsmiViewSep1";
         tsmiViewAutoCol.Name = "tsmiViewAutoCol"; tsmiViewAutoCol.Text = "열 너비 자동 조정(&A)";
+        tsmiViewAutoCol.CheckOnClick = true; tsmiViewAutoCol.Checked = true;
         tsmiViewAutoCol.ShortcutKeys = Keys.Control | Keys.Add;
 
         // 검색 메뉴
@@ -403,7 +403,6 @@ partial class MainForm
         tsmiCopyPath.ShortcutKeyDisplayString = "Ctrl+C";
         tsmiCopyDir.Name = "tsmiCopyDir"; tsmiCopyDir.Text = "디렉터리 복사(&D)";
         tsmiCopyName.Name = "tsmiCopyName"; tsmiCopyName.Text = "파일명 복사(&F)";
-        tsmiSaveAsText.Name = "tsmiSaveAsText"; tsmiSaveAsText.Text = "텍스트 파일로 저장(&S)…";
         tsmiSep4.Name = "tsmiSep4";
         tsmiDeleteFromIndex.Name = "tsmiDeleteFromIndex"; tsmiDeleteFromIndex.Text = "인덱스에서 제거(&L)";
         tsmiDeleteFromIndex.ForeColor = Color.FromArgb(160, 60, 0);
@@ -412,7 +411,7 @@ partial class MainForm
             tsmiOpenFile, tsmiOpenFolder, tsmiSep1,
             tsmiDeleteFile, tsmiProperties, tsmiSep2,
             tsmiSelectAll, tsmiSep3,
-            tsmiCopyPath, tsmiCopyDir, tsmiCopyName, tsmiSaveAsText, tsmiSep4,
+            tsmiCopyPath, tsmiCopyDir, tsmiCopyName, tsmiSep4,
             tsmiDeleteFromIndex]);
         cmsResult.Name = "cmsResult";
 
@@ -580,7 +579,6 @@ partial class MainForm
     private ToolStripMenuItem    tsmiCopyPath        = null!;
     private ToolStripMenuItem    tsmiCopyDir         = null!;
     private ToolStripMenuItem    tsmiCopyName        = null!;
-    private ToolStripMenuItem    tsmiSaveAsText      = null!;
     private ToolStripSeparator   tsmiSep4            = null!;
     private ToolStripMenuItem    tsmiDeleteFromIndex = null!;
 

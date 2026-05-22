@@ -19,6 +19,10 @@ public partial class MainForm : Form
     private readonly Searcher        _searcher;
     private readonly FileWatcher     _watcher;
 
+    // 미리보기 파일 파싱 / 비동기 취소
+    private readonly FileParser              _parser     = new();
+    private          CancellationTokenSource? _snippetCts;
+
     // ─────────────────────────────────────────────────────────
     // UI 상태
     // ─────────────────────────────────────────────────────────
@@ -318,7 +322,7 @@ public partial class MainForm : Form
                 tsmiDeleteFile.Enabled = tsmiProperties.Enabled =
                 tsmiCopyPath.Enabled = tsmiCopyDir.Enabled =
                 tsmiCopyName.Enabled = tsmiDeleteFromIndex.Enabled = hasSel;
-            tsmiSelectAll.Enabled = tsmiSaveAsText.Enabled = hasRes;
+            tsmiSelectAll.Enabled = hasRes;
             if (!hasRes) e.Cancel = true;
         };
         tsmiOpenFile.Click        += (_, _) => OpenSelectedFile();
@@ -329,7 +333,6 @@ public partial class MainForm : Form
         tsmiCopyPath.Click        += (_, _) => CopySelectedPaths();
         tsmiCopyDir.Click         += (_, _) => CopySelectedDirs();
         tsmiCopyName.Click        += (_, _) => CopySelectedNames();
-        tsmiSaveAsText.Click      += (_, _) => SaveResultsAsText();
         tsmiDeleteFromIndex.Click += OnDeleteFromIndex;
 
         // ── 스니펫 닫기 ──────────────────────────────────────────
@@ -348,7 +351,12 @@ public partial class MainForm : Form
         {
             splitPreview.Panel2Collapsed = !tsmiViewSnippet.Checked;
         };
-        tsmiViewAutoCol.Click += (_, _) => AutoResizeColumns();
+        tsmiViewAutoCol.Click += (_, _) =>
+        {
+            _settings.AutoResizeColumns = tsmiViewAutoCol.Checked;
+            _settings.Save();
+            if (tsmiViewAutoCol.Checked) AutoResizeColumns();
+        };
 
         tsmiSearchContent.Click += (_, _) => chkContent.Checked = tsmiSearchContent.Checked;
         tsmiSearchClear.Click   += (_, _) => { txtSearch.Clear(); txtSearch.Focus(); };
@@ -410,7 +418,8 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     private void ApplyTheme()
     {
-        tsmiViewDark.Checked = _settings.IsDarkMode;
+        tsmiViewDark.Checked    = _settings.IsDarkMode;
+        tsmiViewAutoCol.Checked = _settings.AutoResizeColumns;
         if (_settings.IsDarkMode) ApplyDarkTheme();
         else                      ApplyLightTheme();
     }
@@ -671,37 +680,102 @@ public partial class MainForm : Form
 
     private void UpdateSnippetPanel(SearchResult? r)
     {
-        if (r is null) { lblSnippetPath.Text = "항목을 선택하면 미리보기가 표시됩니다"; rtbSnippet.Clear(); return; }
-        lblSnippetPath.Text = r.FilePath;    // 경로 + 파일명 표시
+        // 이전 비동기 로딩 취소
+        _snippetCts?.Cancel();
+        _snippetCts?.Dispose();
+        _snippetCts = null;
+
+        if (r is null)
+        {
+            lblSnippetPath.Text = "항목을 선택하면 미리보기가 표시됩니다";
+            rtbSnippet.Clear();
+            return;
+        }
+
+        lblSnippetPath.Text = r.FilePath;
+
+        // 테마별 색상
+        var clrText = _settings.IsDarkMode ? Color.FromArgb(224, 224, 235) : Color.FromArgb(26, 32, 44);
+        var clrSub  = _settings.IsDarkMode ? Color.FromArgb(140, 140, 165) : SystemColors.GrayText;
+
+        // 로딩 표시
         rtbSnippet.Clear();
-        if (!string.IsNullOrWhiteSpace(r.Snippet))
+        rtbSnippet.ForeColor = clrSub;
+        rtbSnippet.Text = "내용 불러오는 중…";
+
+        var cts      = new CancellationTokenSource();
+        _snippetCts  = cts;
+        var keyword         = txtSearch.Text.Trim();
+        var highlightWord   = Searcher.StripWildcards(keyword);   // 와일드카드 제거 후 하이라이트
+        var filePath        = r.FilePath;
+
+        _ = Task.Run(async () =>
         {
-            rtbSnippet.Text = r.Snippet;
-            HighlightKeywordInSnippet(txtSearch.Text.Trim());
-        }
-        else
-        {
-            rtbSnippet.ForeColor = SystemColors.GrayText;
-            rtbSnippet.Text = r.MatchedInContent ? "(내용 미리보기를 가져오는 중…)" : "(파일명으로 일치)";
-        }
+            try
+            {
+                // 파일 전체 내용 파싱 (최대 1 MB 기준, 초과 시 500 KB 제한)
+                var content = await _parser.ParseFileContent(filePath, maxSizeMB: 1);
+
+                if (cts.IsCancellationRequested) return;
+
+                // 미리보기 최대 100,000자 표시
+                const int PreviewLimit = 100_000;
+                bool truncated = content.Length > PreviewLimit;
+                if (truncated) content = content[..PreviewLimit];
+
+                Invoke(() =>
+                {
+                    if (cts.IsCancellationRequested) return;
+                    rtbSnippet.Clear();
+
+                    if (string.IsNullOrEmpty(content))
+                    {
+                        rtbSnippet.ForeColor = clrSub;
+                        rtbSnippet.Text = "(미리보기를 지원하지 않는 파일 형식입니다)";
+                    }
+                    else
+                    {
+                        rtbSnippet.ForeColor = clrText;
+                        rtbSnippet.Text = content + (truncated ? "\n\n[…이하 내용 생략…]" : string.Empty);
+                        if (!string.IsNullOrEmpty(highlightWord))
+                            HighlightKeywordInSnippet(highlightWord);
+                    }
+                });
+            }
+            catch (OperationCanceledException) { }
+            catch
+            {
+                if (!cts.IsCancellationRequested)
+                    Invoke(() => { rtbSnippet.ForeColor = clrSub; rtbSnippet.Text = "(파일을 읽을 수 없습니다)"; });
+            }
+        }, cts.Token);
     }
 
     private void HighlightKeywordInSnippet(string keyword)
     {
         if (string.IsNullOrEmpty(keyword) || string.IsNullOrEmpty(rtbSnippet.Text)) return;
-        var text = rtbSnippet.Text;
-        int start = 0;
+        var text     = rtbSnippet.Text;
+        int start    = 0;
+        int firstIdx = -1;
+
         while (true)
         {
             int idx = text.IndexOf(keyword, start, StringComparison.OrdinalIgnoreCase);
             if (idx < 0) break;
+            if (firstIdx < 0) firstIdx = idx;   // 첫 번째 위치 기억
             rtbSnippet.Select(idx, keyword.Length);
             rtbSnippet.SelectionBackColor = Color.FromArgb(255, 240, 0);
             rtbSnippet.SelectionColor     = Color.Black;
             start = idx + keyword.Length;
         }
+
+        // 첫 번째 매칭 위치로 스크롤
+        if (firstIdx >= 0)
+        {
+            rtbSnippet.Select(firstIdx, keyword.Length);
+            rtbSnippet.ScrollToCaret();
+        }
         rtbSnippet.SelectionLength = 0;
-        rtbSnippet.ScrollToCaret();
     }
 
     // ─────────────────────────────────────────────────────────
@@ -753,7 +827,7 @@ public partial class MainForm : Form
 
             if (_results.Count > 0)
             {
-                AutoResizeColumns();
+                if (tsmiViewAutoCol.Checked) AutoResizeColumns();
                 if (!splitPreview.Panel2Collapsed) UpdateSnippetPanel(_results[0]);
             }
         }
@@ -1006,22 +1080,6 @@ public partial class MainForm : Form
     private void CopySelectedDirs()  { var t = string.Join(Environment.NewLine, GetSelectedResults().Select(r => Path.GetDirectoryName(r.FilePath) ?? r.FilePath).Distinct()); if (!string.IsNullOrEmpty(t)) try { Clipboard.SetText(t); } catch { } }
     private void CopySelectedNames() { var t = string.Join(Environment.NewLine, GetSelectedResults().Select(r => r.FileName)); if (!string.IsNullOrEmpty(t)) try { Clipboard.SetText(t); } catch { } }
 
-    private void SaveResultsAsText()
-    {
-        if (_results.Count == 0) return;
-        using var dlg = new SaveFileDialog { Title = "결과를 텍스트로 저장", Filter = "텍스트 (*.txt)|*.txt|*.*|*.*", FileName = $"SFM_결과_{DateTime.Now:yyyyMMdd_HHmmss}.txt" };
-        if (dlg.ShowDialog(this) != DialogResult.OK) return;
-        try
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine($"SFM 검색 결과 — \"{txtSearch.Text.Trim()}\"  ({DateTime.Now:yyyy-MM-dd HH:mm:ss})");
-            sb.AppendLine($"총 {_results.Count:N0}개"); sb.AppendLine(new string('─', 80));
-            foreach (var r in _results) sb.AppendLine($"{r.FilePath}  [{FormatSize(r.FileSize)}  {r.ModifiedAt.ToLocalTime():yyyy-MM-dd HH:mm}]");
-            File.WriteAllText(dlg.FileName, sb.ToString(), System.Text.Encoding.UTF8);
-            sslResultCount.Text = $"저장 완료: {dlg.FileName}";
-        }
-        catch (Exception ex) { MessageBox.Show($"저장 실패: {ex.Message}", "SFM", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
-    }
 
     private void OnDeleteFromIndex(object? sender, EventArgs e)
     {
@@ -1068,12 +1126,22 @@ public partial class MainForm : Form
     private void AutoResizeColumns()
     {
         if (_results.Count == 0) return;
-        // ColumnContent: 보이는 행 기준 측정 (VirtualMode에서도 동작)
+
+        // ① 내용 기준 1차 조정 (VirtualMode에서도 동작)
         listResults.AutoResizeColumns(ColumnHeaderAutoResizeStyle.ColumnContent);
-        // 최소 너비 보장
+
+        // ② 각 열마다 헤더 너비도 측정 → 내용·헤더 중 큰 값 적용
+        foreach (ColumnHeader col in listResults.Columns)
+        {
+            int contentWidth = col.Width;
+            listResults.AutoResizeColumn(col.Index, ColumnHeaderAutoResizeStyle.HeaderSize);
+            col.Width = Math.Max(contentWidth, col.Width);
+        }
+
+        // ③ 절대 최솟값 보장
         if (colFileName.Width < 180) colFileName.Width = 180;
         if (colPath.Width     < 200) colPath.Width     = 200;
-        if (colSize.Width     <  80) colSize.Width     =  80;
+        if (colSize.Width     <  90) colSize.Width     =  90;
         if (colModified.Width < 130) colModified.Width = 130;
         if (colMatch.Width    <  70) colMatch.Width    =  70;
     }
@@ -1226,6 +1294,7 @@ public partial class MainForm : Form
     {
         _debounceTimer.Stop(); _debounceTimer.Dispose();
         _autoIndexTimer?.Stop(); _autoIndexTimer?.Dispose();
+        _snippetCts?.Cancel(); _snippetCts?.Dispose();
         _watcher.Dispose(); _db.Dispose();
         _settings.WindowMaximized = (WindowState == FormWindowState.Maximized);
         if (WindowState == FormWindowState.Normal)

@@ -47,6 +47,9 @@ public class AppSettings
     /// <summary>내용 검색 결과에 스니펫(발췌) 표시 여부.</summary>
     public bool ShowSnippetInResult { get; set; } = true;
 
+    /// <summary>검색 결과 표시 후 열 너비 자동 조정 여부. 기본값 true.</summary>
+    public bool AutoResizeColumns { get; set; } = true;
+
     // ── 인프라 (직렬화 제외) ─────────────────────────────────
     [JsonIgnore]
     public string DatabasePath { get; } = Path.Combine(AppDataDir, "sfm_index.db");
@@ -116,6 +119,7 @@ public class AppSettings
         WindowMaximized      = true;
         IsDarkMode           = DetectSystemDarkMode();
         ShowSnippetInResult  = true;
+        AutoResizeColumns    = true;
     }
 
     // ── 내부 유틸 ────────────────────────────────────────────
