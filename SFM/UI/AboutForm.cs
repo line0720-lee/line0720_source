@@ -18,7 +18,7 @@ internal sealed class AboutForm : Form
     {
         // ── 폼 기본 설정 ──────────────────────────────────────
         Text            = "SFM 정보";
-        Size            = new Size(420, 580);
+        Size            = new Size(480, 580);
         MinimumSize     = Size;
         MaximumSize     = Size;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -53,7 +53,7 @@ internal sealed class AboutForm : Form
         // 설명 라벨
         var lblDesc = new Label
         {
-            Text      = "로컬 파일 전문 검색 도구\n파일명 + 내용 인덱싱 · 한국어 검색 지원\nAI 기반 자동 인덱싱 탑재",
+            Text      = "내 컴퓨터 파일 전문 검색 도구\n파일명 + 내용 인덱싱 · 한국어 검색 지원\nAI 기반 자동 인덱싱 탑재",
             Font      = new Font("Segoe UI", 9.5F),
             ForeColor = CText,
             AutoSize  = false,

@@ -329,7 +329,7 @@ partial class MainForm
         // ═════════════════════════════════════════════════════════
         colFileName.Text = "이름";    colFileName.Width = 260;
         colPath.Text     = "경로";    colPath.Width     = 400;
-        colSize.Text     = "파일 크기"; colSize.TextAlign = HorizontalAlignment.Right; colSize.Width = 90;
+        colSize.Text     = "파일 크기"; colSize.TextAlign = HorizontalAlignment.Right; colSize.Width = 105;
         colModified.Text = "수정 날짜"; colModified.Width = 145;
         colMatch.Text    = "유형";    colMatch.Width    = 80;
 

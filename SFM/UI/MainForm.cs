@@ -1141,7 +1141,7 @@ public partial class MainForm : Form
         // ③ 절대 최솟값 보장
         if (colFileName.Width < 180) colFileName.Width = 180;
         if (colPath.Width     < 200) colPath.Width     = 200;
-        if (colSize.Width     <  90) colSize.Width     =  90;
+        if (colSize.Width     < 105) colSize.Width     = 105;
         if (colModified.Width < 130) colModified.Width = 130;
         if (colMatch.Width    <  70) colMatch.Width    =  70;
     }
