@@ -54,7 +54,57 @@ public class DatabaseManager : IDisposable
         _connection = new SqliteConnection(ConnectionString);
         _connection.Open();
         ApplyPragmas();
+
+        // ── 빠른 무결성 검사 (데이터 페이지 손상 조기 감지) ─────
+        using var chk = _connection.CreateCommand();
+        chk.CommandText = "PRAGMA quick_check(1)";
+        var result = chk.ExecuteScalar()?.ToString();
+        if (result != "ok")
+            throw new SqliteException($"DB quick_check 실패: {result}", 11);
+
         CreateSchema();
+        MigrateToTrigramIfNeeded();   // unicode61 → trigram 자동 마이그레이션
+    }
+
+    /// <summary>
+    /// FTS5 테이블이 unicode61 토크나이저를 사용 중이면 trigram으로 재생성한다.
+    /// unicode61 은 한국어를 토큰 단위로 분리하지 못해 부분 검색(예: "가나")이 불가능하다.
+    /// trigram 은 3글자 N-gram으로 색인을 구성하여 임의 부분 문자열 검색을 지원한다.
+    /// 마이그레이션 후 has_content 를 0으로 초기화하면 다음 시작 시
+    /// BuildMissingContentAsync 가 자동으로 내용을 재인덱싱한다.
+    /// </summary>
+    private void MigrateToTrigramIfNeeded()
+    {
+        using var chk = _connection!.CreateCommand();
+        chk.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='file_content'";
+        var ddl = chk.ExecuteScalar()?.ToString() ?? string.Empty;
+
+        // 이미 trigram 이면 마이그레이션 불필요
+        if (ddl.Contains("trigram", StringComparison.OrdinalIgnoreCase)) return;
+
+        // 기존 unicode61 FTS 테이블 삭제 → trigram 으로 재생성
+        Exec("DROP TABLE IF EXISTS file_content");
+        Exec("""
+            CREATE VIRTUAL TABLE file_content USING fts5(
+                file_id  UNINDEXED,
+                content,
+                tokenize = 'trigram'
+            )
+            """);
+
+        // 기존 파일의 has_content 를 0으로 초기화
+        // → 다음 시작 시 BuildMissingContentAsync 가 자동으로 재인덱싱
+        Exec("UPDATE file_index SET has_content = 0");
+    }
+
+    /// <summary>
+    /// 외부에서 강제 복구를 요청할 때 호출. 손상 파일을 백업하고 DB를 재생성한다.
+    /// 검색 중 오류코드 11(CORRUPT) 발생 시 MainForm 에서 호출한다.
+    /// </summary>
+    public void RecoverAndReinit()
+    {
+        RecoverCorruptDatabase();
+        OpenAndInit();
     }
 
     /// <summary>
@@ -118,11 +168,12 @@ public class DatabaseManager : IDisposable
 
         // ── 2. FTS5 전문 검색 가상 테이블 ────────────────────
         // file_id: UNINDEXED → FTS 색인 제외(숫자 키), content: 전문 색인 대상
+        // trigram: 3글자 N-gram 색인 → 한국어 포함 임의 부분 문자열 검색 지원
         Exec("""
             CREATE VIRTUAL TABLE IF NOT EXISTS file_content USING fts5(
                 file_id  UNINDEXED,
                 content,
-                tokenize = 'unicode61'
+                tokenize = 'trigram'
             )
             """);
 
@@ -402,10 +453,14 @@ public class DatabaseManager : IDisposable
 
     /// <summary>
     /// FTS5 전문 검색. SQLite snippet() 함수로 발췌문을 함께 반환한다.
-    /// file_content 가 비어 있으면 빈 목록을 반환한다.
+    /// 2자 이하 쿼리는 trigram 인덱스 미지원이므로 LIKE 폴백으로 처리한다.
     /// </summary>
     public List<(FileIndex File, string Snippet)> SearchByContent(string keyword, int limit)
     {
+        // 2자 이하: trigram 인덱스가 작동하지 않으므로 LIKE 폴백
+        if (NeedsFtsLikeFallback(keyword))
+            return SearchByContentLike(keyword, [], null, null, null, null, limit, 0);
+
         var ftsQuery = EscapeFts(keyword);
 
         using var cmd = Cmd("""
@@ -469,6 +524,7 @@ public class DatabaseManager : IDisposable
 
     /// <summary>
     /// FTS5 전문 검색 + 다중 필터. snippet() 함수로 발췌문을 함께 반환한다.
+    /// 2자 이하 쿼리는 trigram 미지원이므로 LIKE 폴백으로 처리한다.
     /// </summary>
     public List<(FileIndex File, string Snippet)> SearchByContentFiltered(
         string    ftsQuery,
@@ -480,6 +536,11 @@ public class DatabaseManager : IDisposable
         int       limit,
         int       offset = 0)
     {
+        // ftsQuery 는 EscapeFts 가 감싼 값이므로 원문을 추출해 길이 확인
+        var raw = ftsQuery.Trim('"').Trim();
+        if (NeedsFtsLikeFallback(raw))
+            return SearchByContentLike(raw, extensions, minSize, maxSize, after, before, limit, offset);
+
         var sb = new StringBuilder("""
             SELECT fi.id, fi.file_path, fi.file_name, fi.extension, fi.file_size,
                    fi.modified_at, fi.indexed_at, fi.content_hash, fi.has_content,
@@ -510,6 +571,71 @@ public class DatabaseManager : IDisposable
             // FTS 쿼리 문법 오류(특수문자 등) → 빈 목록
         }
         return list;
+    }
+
+    /// <summary>
+    /// 2자 이하 키워드용 LIKE 폴백 내용 검색.
+    /// file_content 테이블의 content 컬럼에 직접 LIKE '%keyword%' 로 검색한다.
+    /// </summary>
+    private List<(FileIndex File, string Snippet)> SearchByContentLike(
+        string    keyword,
+        string[]  extensions,
+        long?     minSize,
+        long?     maxSize,
+        DateTime? after,
+        DateTime? before,
+        int       limit,
+        int       offset)
+    {
+        var sb = new StringBuilder("""
+            SELECT fi.id, fi.file_path, fi.file_name, fi.extension, fi.file_size,
+                   fi.modified_at, fi.indexed_at, fi.content_hash, fi.has_content,
+                   fc.content AS snippet
+            FROM   file_content fc
+            JOIN   file_index fi ON fi.id = fc.file_id
+            WHERE  fc.content LIKE $like ESCAPE '\'
+            """);
+
+        AppendFilters(sb, extensions, minSize, maxSize, after, before, tableAlias: "fi");
+        sb.Append("\nORDER BY fi.modified_at DESC\nLIMIT $limit OFFSET $offset");
+
+        using var cmd = Cmd(sb.ToString());
+        cmd.Parameters.AddWithValue("$like", $"%{keyword}%");
+        AddFilterParams(cmd, extensions, minSize, maxSize, after, before);
+        cmd.Parameters.AddWithValue("$limit",  limit);
+        cmd.Parameters.AddWithValue("$offset", offset);
+
+        var list = new List<(FileIndex, string)>();
+        try
+        {
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                var fullContent = r.IsDBNull(9) ? string.Empty : r.GetString(9);
+                // 스니펫: 키워드 주변 60자 발췌
+                var snippet = ExtractSnippet(fullContent, keyword, 60);
+                list.Add((ReadFileIndex(r), snippet));
+            }
+        }
+        catch (SqliteException) { /* 오류 시 빈 목록 */ }
+        return list;
+    }
+
+    /// <summary>content 에서 keyword 주변 maxChars 자를 발췌하여 반환한다.</summary>
+    private static string ExtractSnippet(string content, string keyword, int maxChars)
+    {
+        if (string.IsNullOrEmpty(content)) return string.Empty;
+        var idx = content.IndexOf(keyword, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return content.Length > maxChars ? content[..maxChars] + "…" : content;
+
+        int start = Math.Max(0, idx - maxChars / 2);
+        int end   = Math.Min(content.Length, start + maxChars + keyword.Length);
+        start     = Math.Max(0, end - maxChars - keyword.Length);
+
+        var snippet = content[start..end].Replace('\n', ' ').Replace('\r', ' ');
+        if (start > 0)         snippet = "…" + snippet;
+        if (end < content.Length) snippet += "…";
+        return snippet;
     }
 
     /// <summary>
@@ -650,6 +776,12 @@ public class DatabaseManager : IDisposable
         var cleaned = keyword.Replace("\"", " ").Trim();
         return string.IsNullOrEmpty(cleaned) ? "\"\"" : $"\"{cleaned}\"";
     }
+
+    /// <summary>
+    /// trigram 토크나이저는 3자 미만 쿼리를 처리하지 못하므로,
+    /// 2자 이하 쿼리(주로 한국어)는 content 컬럼에 LIKE 검색으로 폴백한다.
+    /// </summary>
+    private bool NeedsFtsLikeFallback(string keyword) => keyword.Length < 3;
 
     private List<string> ReadStrings(SqliteCommand cmd)
     {

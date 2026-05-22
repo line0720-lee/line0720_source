@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Text;
 using SFM.Core;
@@ -50,6 +51,11 @@ public partial class MainForm : Form
     private readonly Dictionary<string, int> _shellIconCache =
         new(StringComparer.OrdinalIgnoreCase);
 
+    // ── 자동 인덱싱 ──────────────────────────────────────────────
+    private bool _isIndexing = false;
+    private int  _autoIndexCycle = 0;          // 5분 주기 카운터 (6회 = 30분마다 Vacuum)
+    private System.Windows.Forms.Timer? _autoIndexTimer;
+
     private string[] GetSelectedExtensions()
     {
         var list = new List<string>();
@@ -95,13 +101,24 @@ public partial class MainForm : Form
         chkContent.Checked         = _settings.EnableContentSearch;
         tsmiSearchContent.Checked  = _settings.EnableContentSearch;
 
+        // 오버레이 카드 Paint — 둥근 테두리
+        pnlOverlayCard.Paint += OnOverlayCardPaint;
+        pnlOverlay.Resize    += (_, _) => CenterOverlayCard();
+
         WireEvents();
         ApplyTheme();
         RestoreWindowBounds();
         RefreshDbStats();
 
+        // 시작 시 마지막 인덱싱 날짜 표시
+        if (_settings.LastIndexedAt.HasValue)
+            sslLastIndexed.Text = $"인덱싱: {_settings.LastIndexedAt.Value:yyyy-MM-dd HH:mm}";
+
         _watcher.StartWatching(_settings.IndexRootPaths);
         ActiveControl = txtSearch;
+
+        // 5분 자동 증분 인덱싱 타이머 설정
+        SetupAutoIndexTimer();
 
         // SplitterDistance는 폼 크기 확정 후 설정 (EndInit 오류 방지)
         Load += (_, _) =>
@@ -111,11 +128,34 @@ public partial class MainForm : Form
                 splitPreview.Panel1MinSize    = 300;
                 splitPreview.Panel2MinSize    = 180;
                 splitPreview.SplitterDistance = Math.Clamp(
-                    (int)(splitPreview.Width * 0.72),   // 미리보기 ~28% 기본값
+                    (int)(splitPreview.Width * 0.72),
                     splitPreview.Panel1MinSize,
                     splitPreview.Width - splitPreview.Panel2MinSize - splitPreview.SplitterWidth);
             }
             catch { /* 방어적 처리 */ }
+
+            // 첫 실행 감지: LastIndexedAt == null → 자동 인덱싱 시작
+            if (_settings.LastIndexedAt == null)
+            {
+                StartFirstRunIndex();
+            }
+            else if (_settings.EnableContentIndexing)
+            {
+                // 이미 인덱스는 있지만 내용이 한 건도 없는 경우
+                // (이전 버전에서 EnableContentIndexing=false 로 인덱싱한 경우 등)
+                // → 백그라운드에서 내용만 추가 인덱싱
+                try
+                {
+                    var stats = _db.GetIndexStats();
+                    if (stats.TotalFiles > 0 && stats.ContentIndexedFiles == 0)
+                    {
+                        sslIndexStatus.Text = "내용 인덱싱 시작 (백그라운드)…";
+                        _isIndexing = true;
+                        _ = _indexer.BuildMissingContentAsync();
+                    }
+                }
+                catch { /* DB 통계 조회 실패 → 무시 */ }
+            }
         };
     }
 
@@ -166,9 +206,11 @@ public partial class MainForm : Form
             {
                 try
                 {
-                    // Icon.FromHandle 은 HICON 소유권을 갖지 않으므로 Clone 후 직접 해제
+                    // Icon.FromHandle 은 HICON 소유권을 갖지 않으므로 직접 해제
+                    // ※ bmp 에 'using' 금지 — ImageList 가 핸들 생성 전까지 참조를 유지해야 함
+                    //   (disposed 비트맵에 접근 시 "Parameter is not valid" 발생)
                     using var tmpIcon = Icon.FromHandle(sfi.hIcon);
-                    using var bmp     = tmpIcon.ToBitmap();
+                    var bmp = tmpIcon.ToBitmap();   // 해제 안 함: ImageList 내부 _originals 가 소유
                     imgListSmall.Images.Add(bmp);
                     idx = imgListSmall.Images.Count - 1;
                 }
@@ -311,30 +353,54 @@ public partial class MainForm : Form
         tsmiSearchContent.Click += (_, _) => chkContent.Checked = tsmiSearchContent.Checked;
         tsmiSearchClear.Click   += (_, _) => { txtSearch.Clear(); txtSearch.Focus(); };
 
-        tsmiToolsIndex.Click   += OnSettingsClick;
         tsmiToolsReindex.Click += OnReindexClick;
-        tsmiToolsContent.Click += OnBuildContentClick;
         tsmiToolsVacuum.Click  += OnVacuumClick;
 
-        tsmiHelpAbout.Click += (_, _) => MessageBox.Show(
-            "SFM — Smart File Manager v1.0\n\n로컬 파일 전문 검색 도구\n" +
-            "파일명 + 내용 인덱싱 · 한국어 초성 검색 지원\n\n단축키\n" +
-            "  Ctrl+F     검색창 포커스\n" +
-            "  F4         내용 검색 토글\n  F5         전체 재인덱싱\n" +
-            "  Enter      파일 열기 / 검색\n  Ctrl+C     경로 복사\n" +
-            "  Ctrl+A     전체 선택\n  Alt+←/→   이전/다음 페이지\n  Esc        검색어 지우기",
-            "SFM 정보", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        tsmiHelpAbout.Click += (_, _) => new AboutForm().ShowDialog(this);
 
         // ── Indexer 이벤트 ───────────────────────────────────────
         _indexer.IndexProgressChanged += p => Invoke(() =>
-            sslIndexStatus.Text = $"[{p.Phase}] {p.Processed:N0}/{p.Total:N0}  {Path.GetFileName(p.FilePath)}");
+        {
+            sslIndexStatus.Text = $"[{p.Phase}] {p.Processed:N0}/{p.Total:N0}  {Path.GetFileName(p.FilePath)}";
+            // 첫 실행 오버레이 진행 표시
+            if (pnlOverlay.Visible)
+            {
+                lblOverlayProgress.Text = p.Total > 0
+                    ? $"{p.Processed:N0} / {p.Total:N0} 파일 처리 중..."
+                    : $"{p.Processed:N0} 파일 처리 중...";
+            }
+        });
 
         _indexer.IndexCompleted += r => Invoke(() =>
         {
-            sslIndexStatus.Text = $"완료 {r.TotalIndexed:N0}개  +{r.Added} ~{r.Updated} -{r.Deleted}  {r.Elapsed.TotalSeconds:F1}s";
-            sslLastIndexed.Text = $"인덱싱: {DateTime.Now:HH:mm}";
-            RefreshDbStats();
-            if (!string.IsNullOrWhiteSpace(txtSearch.Text)) _ = RunSearchAsync();
+            _isIndexing = false;
+            HideFirstRunOverlay();   // 첫 실행 오버레이가 떠 있으면 닫음
+
+            bool hasRealChanges = r.Added + r.Updated + r.Deleted > 0;
+
+            if (hasRealChanges)
+            {
+                // 실제 변경이 있을 때만 상태 갱신·저장
+                sslIndexStatus.Text = $"완료 {r.TotalIndexed:N0}개  +{r.Added} ~{r.Updated} -{r.Deleted}  {r.Elapsed.TotalSeconds:F1}s";
+
+                var now = DateTime.Now;
+                _settings.LastIndexedAt = now;
+                _settings.Save();
+                sslLastIndexed.Text = $"인덱싱: {now:yyyy-MM-dd HH:mm}";
+
+                RefreshDbStats();
+
+                // 파일 삭제 발생 시 DB 파편화 정리
+                if (r.Deleted > 0)
+                    Task.Run(() => { try { _db.Vacuum(); } catch { } });
+
+                if (!string.IsNullOrWhiteSpace(txtSearch.Text)) _ = RunSearchAsync();
+            }
+            else
+            {
+                // 변경 없음 → 상태바만 조용히 비움, LastIndexedAt·설정 파일 갱신 없음
+                sslIndexStatus.Text = string.Empty;
+            }
         });
         _indexer.IndexErrorOccurred += err => Debug.WriteLine($"[IndexError] {err.FilePath}: {err.Message}");
     }
@@ -349,76 +415,198 @@ public partial class MainForm : Form
         else                      ApplyLightTheme();
     }
 
+    // ── 커스텀 메뉴 렌더러 ──────────────────────────────────────
+    private sealed class BlueMenuRenderer : ToolStripProfessionalRenderer
+    {
+        public BlueMenuRenderer() : base(new BlueColorTable()) { }
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            if (!e.Item.Selected) { base.OnRenderMenuItemBackground(e); return; }
+            using var br = new SolidBrush(Color.FromArgb(30, 120, 210));
+            e.Graphics.FillRectangle(br, e.Item.ContentRectangle);
+        }
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e) { /* 테두리 제거 */ }
+    }
+    private sealed class BlueColorTable : ProfessionalColorTable
+    {
+        readonly Color _bg = Color.FromArgb(13, 71, 161);
+        public override Color MenuStripGradientBegin           => _bg;
+        public override Color MenuStripGradientEnd             => _bg;
+        public override Color MenuItemSelectedGradientBegin    => Color.FromArgb(30, 120, 210);
+        public override Color MenuItemSelectedGradientEnd      => Color.FromArgb(30, 120, 210);
+        public override Color MenuItemSelected                 => Color.FromArgb(30, 120, 210);
+        public override Color MenuItemBorder                   => Color.FromArgb(60, 150, 240);
+        public override Color MenuItemPressedGradientBegin     => Color.FromArgb(10, 60, 150);
+        public override Color MenuItemPressedGradientEnd       => Color.FromArgb(10, 60, 150);
+        public override Color ToolStripDropDownBackground      => Color.FromArgb(250, 252, 255);
+        public override Color MenuBorder                       => Color.FromArgb(190, 215, 245);
+        public override Color SeparatorDark                    => Color.FromArgb(190, 215, 245);
+        public override Color SeparatorLight                   => Color.White;
+        public override Color ImageMarginGradientBegin         => Color.FromArgb(237, 244, 255);
+        public override Color ImageMarginGradientMiddle        => Color.FromArgb(237, 244, 255);
+        public override Color ImageMarginGradientEnd           => Color.FromArgb(237, 244, 255);
+        public override Color CheckBackground                  => Color.FromArgb(200, 225, 255);
+        public override Color CheckSelectedBackground          => Color.FromArgb(170, 205, 250);
+        public override Color CheckPressedBackground           => Color.FromArgb(150, 190, 245);
+    }
+
+    private sealed class DarkMenuRenderer : ToolStripProfessionalRenderer
+    {
+        public DarkMenuRenderer() : base(new DarkColorTable()) { }
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e) { }
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            e.TextColor = Color.White;
+            base.OnRenderItemText(e);
+        }
+    }
+    private sealed class DarkColorTable : ProfessionalColorTable
+    {
+        readonly Color _bg = Color.FromArgb(30, 30, 40);
+        public override Color MenuStripGradientBegin           => _bg;
+        public override Color MenuStripGradientEnd             => _bg;
+        public override Color MenuItemSelectedGradientBegin    => Color.FromArgb(50, 50, 70);
+        public override Color MenuItemSelectedGradientEnd      => Color.FromArgb(50, 50, 70);
+        public override Color MenuItemSelected                 => Color.FromArgb(50, 50, 70);
+        public override Color MenuItemBorder                   => Color.FromArgb(80, 80, 110);
+        public override Color ToolStripDropDownBackground      => Color.FromArgb(40, 40, 55);
+        public override Color MenuBorder                       => Color.FromArgb(70, 70, 90);
+        public override Color SeparatorDark                    => Color.FromArgb(70, 70, 90);
+        public override Color SeparatorLight                   => Color.FromArgb(60, 60, 80);
+        public override Color ImageMarginGradientBegin         => Color.FromArgb(35, 35, 50);
+        public override Color ImageMarginGradientMiddle        => Color.FromArgb(35, 35, 50);
+        public override Color ImageMarginGradientEnd           => Color.FromArgb(35, 35, 50);
+    }
+
+    // ─────────────────────────────────────────────────────────────
     private void ApplyDarkTheme()
     {
-        var bg   = Color.FromArgb(28,  28,  28);
-        var surf = Color.FromArgb(45,  45,  48);
-        var text = Color.FromArgb(220, 220, 220);
-        var gray = Color.FromArgb(140, 140, 140);
+        var cBg      = Color.FromArgb(18,  18,  28);   // 거의 검정 (약간 남색)
+        var cSurface = Color.FromArgb(30,  30,  45);   // 카드 표면
+        var cSurf2   = Color.FromArgb(38,  38,  55);   // 약간 밝은 표면
+        var cText    = Color.FromArgb(224, 224, 235);
+        var cSub     = Color.FromArgb(140, 140, 165);
+        var cBorder  = Color.FromArgb(55,  55,  75);
+        var cAccent  = Color.FromArgb(66,  133, 244);  // 구글 블루 느낌
 
-        BackColor = bg; ForeColor = text;
-        menuStrip.BackColor = Color.FromArgb(37, 37, 38); menuStrip.ForeColor = text;
-        foreach (ToolStripMenuItem m in menuStrip.Items.OfType<ToolStripMenuItem>()) m.ForeColor = text;
+        BackColor = cBg; ForeColor = cText;
 
-        pnlSearch.BackColor = tblToolbar.BackColor = Color.FromArgb(37, 37, 38);
-        pnlOptions.BackColor = Color.FromArgb(37, 37, 38);
+        menuStrip.Renderer = new DarkMenuRenderer();
+        menuStrip.BackColor = Color.FromArgb(30, 30, 40);
+        menuStrip.ForeColor = cText;
+        foreach (ToolStripMenuItem m in menuStrip.Items.OfType<ToolStripMenuItem>())
+        { m.ForeColor = cText; }
 
-        txtSearch.BackColor = surf; txtSearch.ForeColor = text; txtSearch.BorderStyle = BorderStyle.FixedSingle;
-        btnClear.BackColor = Color.FromArgb(37, 37, 38); btnClear.ForeColor = gray;
-        btnSearch.BackColor = Color.FromArgb(0, 100, 180); btnSearch.ForeColor = Color.White;
+        pnlSearch.BackColor = tblToolbar.BackColor = cSurface;
+        pnlOptions.BackColor = cSurf2;
 
-        chkContent.ForeColor = text; lblFilter.ForeColor = gray;
-        chkTypeDoc.ForeColor = chkTypePdf.ForeColor = chkTypeImage.ForeColor = chkTypeCode.ForeColor = text;
-        lblDbInfo.ForeColor = gray;
+        txtSearch.BackColor = cSurf2; txtSearch.ForeColor = cText;
+        txtSearch.BorderStyle = BorderStyle.FixedSingle;
 
-        splitPreview.BackColor = Color.FromArgb(60, 60, 65);  // 스플리터 구분선 색상
-        listResults.BackColor = Color.FromArgb(25, 25, 25); listResults.ForeColor = text;
+        btnClear.BackColor = Color.Transparent;
+        btnClear.FlatAppearance.BorderSize = 0;
+        btnClear.ForeColor = cSub;
+        btnSearch.BackColor = cAccent;
+        btnSearch.ForeColor = Color.White;
+        btnSearch.FlatAppearance.BorderColor = cAccent;
+        btnSearch.FlatAppearance.BorderSize  = 0;
 
-        pnlSnippet.BackColor = Color.FromArgb(35, 35, 35);
-        pnlSnippetBar.BackColor = Color.FromArgb(50, 50, 50);
-        lblSnippetIcon.ForeColor = text; lblSnippetPath.ForeColor = gray;
-        btnSnippetClose.BackColor = Color.FromArgb(50, 50, 50); btnSnippetClose.ForeColor = gray;
-        rtbSnippet.BackColor = Color.FromArgb(25, 25, 25); rtbSnippet.ForeColor = text;
+        chkContent.ForeColor = cText; lblFilter.ForeColor = cSub;
+        chkTypeDoc.ForeColor = chkTypePdf.ForeColor =
+            chkTypeImage.ForeColor = chkTypeCode.ForeColor = cText;
+        lblDbInfo.ForeColor = cSub;
+        lblAiNotice.ForeColor = Color.FromArgb(80, 100, 140);
 
-        statusStrip.BackColor = surf; statusStrip.ForeColor = text;
-        foreach (ToolStripItem item in statusStrip.Items) item.ForeColor = text;
-        _sslPrevPage.ForeColor = _sslNextPage.ForeColor = text;
+        splitPreview.BackColor = cBorder;
 
-        _recentBox.BackColor = surf; _recentBox.ForeColor = text;
+        listResults.BackColor = cSurface; listResults.ForeColor = cText;
+
+        pnlSnippet.BackColor    = cSurface;
+        pnlSnippetBar.BackColor = cSurf2;
+        lblSnippetIcon.ForeColor = cAccent; lblSnippetPath.ForeColor = cSub;
+        btnSnippetClose.BackColor = Color.Transparent;
+        btnSnippetClose.FlatAppearance.BorderSize = 0;
+        btnSnippetClose.ForeColor = cSub;
+        rtbSnippet.BackColor = cSurface; rtbSnippet.ForeColor = cText;
+
+        statusStrip.BackColor = Color.FromArgb(24, 24, 36); statusStrip.ForeColor = cSub;
+        foreach (ToolStripItem item in statusStrip.Items) item.ForeColor = cSub;
+        _sslPrevPage.ForeColor = _sslNextPage.ForeColor = cSub;
+
+        _recentBox.BackColor = cSurf2; _recentBox.ForeColor = cText;
+
+        // 오버레이
+        pnlOverlay.BackColor         = Color.FromArgb(18, 22, 38);
+        lblOverlayTitle.ForeColor    = Color.FromArgb(30, 35, 50);
+        lblOverlayDesc.ForeColor     = Color.FromArgb(100, 116, 139);
+        lblOverlayProgress.ForeColor = Color.FromArgb(120, 130, 150);
     }
 
     private void ApplyLightTheme()
     {
-        var toolbar = Color.FromArgb(240, 240, 240);
-        BackColor = SystemColors.Window; ForeColor = SystemColors.WindowText;
-        menuStrip.BackColor = SystemColors.MenuBar; menuStrip.ForeColor = SystemColors.MenuText;
+        var cPrimary = Color.FromArgb(13,  71, 161);   // #0D47A1 딥 블루
+        var cAccent  = Color.FromArgb(25, 118, 210);   // #1976D2 버튼 강조
+        var cBg      = Color.FromArgb(245, 246, 250);  // 배경 (아주 연한 회색)
+        var cSurface = Color.White;
+        var cSurf2   = Color.FromArgb(240, 244, 252);  // 패널 서브 표면 (연한 블루-회색)
+        var cText    = Color.FromArgb(26,  32,  44);   // 진한 텍스트
+        var cSub     = Color.FromArgb(100, 116, 139);  // 서브 텍스트
+        var cBorder  = Color.FromArgb(203, 213, 225);  // 테두리
 
-        pnlSearch.BackColor = tblToolbar.BackColor = toolbar;
-        pnlOptions.BackColor = Color.FromArgb(248, 248, 248);
+        BackColor = cBg; ForeColor = cText;
 
-        txtSearch.BackColor = SystemColors.Window; txtSearch.ForeColor = SystemColors.WindowText;
+        menuStrip.Renderer  = new BlueMenuRenderer();
+        menuStrip.BackColor = Color.FromArgb(13, 71, 161);
+        menuStrip.ForeColor = Color.White;
+        foreach (ToolStripMenuItem m in menuStrip.Items.OfType<ToolStripMenuItem>())
+            m.ForeColor = Color.White;
+
+        // 검색 패널 — 흰색 카드 느낌
+        pnlSearch.BackColor = tblToolbar.BackColor = cSurface;
+        pnlOptions.BackColor = cSurf2;
+
+        txtSearch.BackColor = cSurface; txtSearch.ForeColor = cText;
         txtSearch.BorderStyle = BorderStyle.FixedSingle;
-        btnClear.BackColor = toolbar; btnClear.ForeColor = Color.FromArgb(100, 100, 100);
-        btnSearch.BackColor = Color.FromArgb(0, 120, 212); btnSearch.ForeColor = Color.White;
 
-        chkContent.ForeColor = SystemColors.WindowText; lblFilter.ForeColor = SystemColors.GrayText;
-        chkTypeDoc.ForeColor = chkTypePdf.ForeColor = chkTypeImage.ForeColor = chkTypeCode.ForeColor = SystemColors.WindowText;
-        lblDbInfo.ForeColor = SystemColors.GrayText;
+        btnClear.BackColor = Color.Transparent;
+        btnClear.FlatAppearance.BorderSize = 0;
+        btnClear.ForeColor = cSub;
+        btnSearch.BackColor = cAccent;
+        btnSearch.ForeColor = Color.White;
+        btnSearch.FlatAppearance.BorderColor = cAccent;
+        btnSearch.FlatAppearance.BorderSize  = 0;
 
-        splitPreview.BackColor = Color.FromArgb(200, 200, 200);  // 스플리터 구분선 색상
-        listResults.BackColor = SystemColors.Window; listResults.ForeColor = SystemColors.WindowText;
+        chkContent.ForeColor = cText; lblFilter.ForeColor = cSub;
+        chkTypeDoc.ForeColor = chkTypePdf.ForeColor =
+            chkTypeImage.ForeColor = chkTypeCode.ForeColor = cText;
+        lblDbInfo.ForeColor = cSub;
+        lblAiNotice.ForeColor = Color.FromArgb(100, 130, 180);
 
-        pnlSnippet.BackColor = Color.FromArgb(252, 252, 252);
-        pnlSnippetBar.BackColor = Color.FromArgb(235, 235, 235);
-        lblSnippetIcon.ForeColor = SystemColors.WindowText; lblSnippetPath.ForeColor = SystemColors.GrayText;
-        btnSnippetClose.BackColor = Color.FromArgb(235, 235, 235); btnSnippetClose.ForeColor = SystemColors.GrayText;
-        rtbSnippet.BackColor = Color.FromArgb(252, 252, 252); rtbSnippet.ForeColor = SystemColors.WindowText;
+        splitPreview.BackColor = cBorder;   // 스플리터 선 색상
 
-        statusStrip.BackColor = toolbar; statusStrip.ForeColor = SystemColors.WindowText;
-        foreach (ToolStripItem item in statusStrip.Items) item.ForeColor = SystemColors.WindowText;
-        _sslPrevPage.ForeColor = _sslNextPage.ForeColor = SystemColors.WindowText;
+        listResults.BackColor = cSurface; listResults.ForeColor = cText;
 
-        _recentBox.BackColor = SystemColors.Window; _recentBox.ForeColor = SystemColors.WindowText;
+        // 미리보기 — 연한 블루 헤더 바
+        pnlSnippet.BackColor    = cSurface;
+        pnlSnippetBar.BackColor = cSurf2;
+        lblSnippetIcon.ForeColor = cAccent; lblSnippetPath.ForeColor = cSub;
+        btnSnippetClose.BackColor = Color.Transparent;
+        btnSnippetClose.FlatAppearance.BorderSize = 0;
+        btnSnippetClose.ForeColor = cSub;
+        rtbSnippet.BackColor = cSurface; rtbSnippet.ForeColor = cText;
+
+        // 상태 바 — 흰색 바닥
+        statusStrip.BackColor = cSurface; statusStrip.ForeColor = cSub;
+        foreach (ToolStripItem item in statusStrip.Items) item.ForeColor = cSub;
+        _sslPrevPage.ForeColor = _sslNextPage.ForeColor = cSub;
+
+        _recentBox.BackColor = cSurface; _recentBox.ForeColor = cText;
+
+        // 오버레이
+        pnlOverlay.BackColor         = Color.FromArgb(30, 35, 50);
+        lblOverlayTitle.ForeColor    = Color.FromArgb(26, 32, 44);
+        lblOverlayDesc.ForeColor     = Color.FromArgb(100, 116, 139);
+        lblOverlayProgress.ForeColor = Color.FromArgb(120, 130, 150);
     }
 
     // ─────────────────────────────────────────────────────────
@@ -484,7 +672,7 @@ public partial class MainForm : Form
     private void UpdateSnippetPanel(SearchResult? r)
     {
         if (r is null) { lblSnippetPath.Text = "항목을 선택하면 미리보기가 표시됩니다"; rtbSnippet.Clear(); return; }
-        lblSnippetPath.Text = r.FileName;   // 경로 제외, 파일명만 표시
+        lblSnippetPath.Text = r.FilePath;    // 경로 + 파일명 표시
         rtbSnippet.Clear();
         if (!string.IsNullOrWhiteSpace(r.Snippet))
         {
@@ -569,6 +757,21 @@ public partial class MainForm : Form
                 if (!splitPreview.Panel2Collapsed) UpdateSnippetPanel(_results[0]);
             }
         }
+        catch (Microsoft.Data.Sqlite.SqliteException sqEx) when (sqEx.SqliteErrorCode == 11)
+        {
+            // 오류코드 11 = SQLITE_CORRUPT — 손상 DB 자동 복구
+            sslResultCount.Text = "DB 손상 감지 — 자동 복구 중…";
+            try
+            {
+                _db.RecoverAndReinit();
+                sslResultCount.Text = "DB 복구 완료. [도구 → 전체 재인덱싱(F5)]을 실행하세요.";
+            }
+            catch (Exception rex)
+            {
+                sslResultCount.Text = $"DB 복구 실패: {rex.Message}";
+                Debug.WriteLine($"[DB Recovery] {rex}");
+            }
+        }
         catch (Exception ex)
         {
             sslResultCount.Text = $"검색 오류: {ex.Message}";
@@ -597,28 +800,7 @@ public partial class MainForm : Form
                 _recentBox.Focus();
                 if (_recentBox.Items.Count > 0) _recentBox.SelectedIndex = 0;
                 e.Handled = true; break;
-            case Keys.Escape:
-                if (_recentBox.Visible)
-                {
-                    _recentBox.Visible = false;              // 최근 목록 닫기
-                }
-                else if (txtSearch.Text.Length > 0)
-                {
-                    txtSearch.Clear();                       // 1st ESC: 검색어 지우기
-                }
-                else
-                {
-                    // 2nd ESC (검색어 이미 비어 있음): 결과 전체 초기화
-                    _debounceTimer.Stop();
-                    _results = []; _currentPage = 0; _lastKeyword = string.Empty;
-                    listResults.VirtualListSize = 0;
-                    sslResultCount.Text = "준비";
-                    _sslPrevPage.Enabled = _sslNextPage.Enabled = false;
-                    ResetSortHeaders();
-                    UpdateSnippetPanel(null);
-                }
-                txtSearch.Focus();
-                e.Handled = true; break;
+            // Keys.Escape 는 ProcessCmdKey 에서 폼 레벨로 처리
             case Keys.Enter:
                 _debounceTimer.Stop(); _ = RunSearchAsync(); e.Handled = true; break;
         }
@@ -658,6 +840,31 @@ public partial class MainForm : Form
     {
         switch (keyData)
         {
+            case Keys.Escape:
+                // 폼 전체 ESC — 어떤 컨트롤에 포커스가 있어도 동작
+                if (_recentBox.Visible)
+                {
+                    _recentBox.Visible = false;
+                }
+                else if (txtSearch.Text.Length > 0)
+                {
+                    txtSearch.Clear();                           // 1차 ESC: 검색어 삭제
+                }
+                else
+                {
+                    // 2차 ESC: 결과 전체 초기화
+                    _debounceTimer.Stop();
+                    _results = []; _currentPage = 0; _lastKeyword = string.Empty;
+                    listResults.VirtualListSize = 0;
+                    sslResultCount.Text = "준비";
+                    _sslPrevPage.Enabled = _sslNextPage.Enabled = false;
+                    ResetSortHeaders();
+                    UpdateSnippetPanel(null);
+                    Text = "SFM — Smart File Manager";
+                }
+                txtSearch.Focus();                               // 항상 검색창으로 포커스
+                return true;
+
             case Keys.Enter when txtSearch.Focused:
                 if (_recentBox.Visible) { if (_recentBox.SelectedItem is string sel) txtSearch.Text = sel; _recentBox.Visible = false; }
                 _debounceTimer.Stop(); _ = RunSearchAsync(); return true;
@@ -828,21 +1035,12 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     // 도구 메뉴
     // ─────────────────────────────────────────────────────────
-    private void OnSettingsClick(object? sender, EventArgs e)
-    {
-        using var dlg = new IndexSettingsForm(_indexer, _db, _settings);
-        if (dlg.ShowDialog(this) != DialogResult.OK) return;
-        chkContent.Checked = _settings.EnableContentSearch;
-        _watcher.StopWatching(); _watcher.StartWatching(_settings.IndexRootPaths);
-        _ = RunSearchAsync();
-    }
     private void OnReindexClick(object? sender, EventArgs e)
     {
         if (MessageBox.Show("전체 재인덱싱을 시작하시겠습니까?", "SFM", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
         sslIndexStatus.Text = "재인덱싱 준비 중…";
         _ = _indexer.BuildIndexAsync(_settings.IndexRootPaths);
     }
-    private void OnBuildContentClick(object? sender, EventArgs e) { sslIndexStatus.Text = "내용 인덱싱 시작…"; _ = _indexer.BuildMissingContentAsync(); }
     private void OnVacuumClick(object? sender, EventArgs e)
     {
         sslIndexStatus.Text = "DB 최적화 중…";
@@ -881,6 +1079,119 @@ public partial class MainForm : Form
     }
 
     // ─────────────────────────────────────────────────────────
+    // 첫 실행 오버레이
+    // ─────────────────────────────────────────────────────────
+
+    private void StartFirstRunIndex()
+    {
+        // IndexRootPaths 가 비어 있으면 로컬 고정 드라이브 전체를 기본값으로 설정
+        if (_settings.IndexRootPaths.Length == 0)
+        {
+            _settings.IndexRootPaths = DriveInfo.GetDrives()
+                .Where(d => d.DriveType == DriveType.Fixed && d.IsReady)
+                .Select(d => d.RootDirectory.FullName)
+                .ToArray();
+            _settings.Save();
+            _watcher.StopWatching();
+            _watcher.StartWatching(_settings.IndexRootPaths);
+        }
+
+        ShowFirstRunOverlay();
+        _isIndexing = true;
+        _ = _indexer.BuildIndexAsync(_settings.IndexRootPaths);
+    }
+
+    private void ShowFirstRunOverlay()
+    {
+        pnlOverlay.SetBounds(0, 0, ClientSize.Width, ClientSize.Height);
+        CenterOverlayCard();
+        pnlOverlay.BringToFront();
+        pnlOverlay.Visible = true;
+    }
+
+    private void HideFirstRunOverlay()
+    {
+        if (pnlOverlay.Visible) pnlOverlay.Visible = false;
+    }
+
+    private void CenterOverlayCard()
+    {
+        pnlOverlayCard.Location = new Point(
+            (pnlOverlay.Width  - pnlOverlayCard.Width)  / 2,
+            (pnlOverlay.Height - pnlOverlayCard.Height) / 2);
+    }
+
+    private static void OnOverlayCardPaint(object? sender, PaintEventArgs e)
+    {
+        var g  = e.Graphics;
+        var rc = ((Panel)sender!).ClientRectangle;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        // 그림자 (약간 아래-오른쪽 오프셋)
+        var shadowRc = rc; shadowRc.Inflate(-2, -2); shadowRc.Offset(3, 4);
+        using var shadowBr = new SolidBrush(Color.FromArgb(40, 0, 0, 0));
+        using var shadowPath = RoundedRectPath(shadowRc, 14);
+        g.FillPath(shadowBr, shadowPath);
+
+        // 카드 배경
+        using var cardBr   = new SolidBrush(Color.White);
+        using var cardPath = RoundedRectPath(new Rectangle(rc.X, rc.Y, rc.Width - 4, rc.Height - 4), 14);
+        g.FillPath(cardBr, cardPath);
+
+        // 카드 테두리
+        using var borderPen = new Pen(Color.FromArgb(220, 228, 240), 1.2f);
+        g.DrawPath(borderPen, cardPath);
+    }
+
+    private static GraphicsPath RoundedRectPath(Rectangle r, int radius)
+    {
+        var path = new GraphicsPath();
+        path.AddArc(r.X,              r.Y,               radius * 2, radius * 2, 180, 90);
+        path.AddArc(r.Right - radius * 2, r.Y,           radius * 2, radius * 2, 270, 90);
+        path.AddArc(r.Right - radius * 2, r.Bottom - radius * 2, radius * 2, radius * 2, 0, 90);
+        path.AddArc(r.X,              r.Bottom - radius * 2, radius * 2, radius * 2, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // 5분 자동 증분 인덱싱
+    // ─────────────────────────────────────────────────────────
+
+    private void SetupAutoIndexTimer()
+    {
+        _autoIndexTimer = new System.Windows.Forms.Timer { Interval = 5 * 60 * 1000 }; // 5분
+        _autoIndexTimer.Tick += OnAutoIndexTick;
+        _autoIndexTimer.Start();
+    }
+
+    private void OnAutoIndexTick(object? sender, EventArgs e)
+    {
+        // 이미 인덱싱 중이거나 경로 미설정이면 스킵
+        if (_isIndexing || _settings.IndexRootPaths.Length == 0) return;
+
+        // ① FileWatcher 가 변경을 감지했거나
+        // ② 마지막 인덱싱 후 30분 이상 경과(앱 종료 중 발생한 변경 보정용)
+        //    일 때만 실행 — 변경이 없으면 조용히 스킵
+        bool hasPending  = _watcher.HasPendingChanges;
+        bool longElapsed = !_settings.LastIndexedAt.HasValue ||
+                           (DateTime.Now - _settings.LastIndexedAt.Value).TotalMinutes >= 30;
+
+        if (!hasPending && !longElapsed) return;
+
+        _watcher.ResetPendingChanges();   // 플래그 초기화 (이 주기의 변경은 이번에 처리)
+        _isIndexing = true;
+        _autoIndexCycle++;
+        sslIndexStatus.Text = $"자동 인덱싱 중… ({DateTime.Now:HH:mm})";
+
+        _ = Task.Run(async () =>
+        {
+            try   { await _indexer.UpdateIndexAsync(); }
+            catch { Invoke(() => { _isIndexing = false; sslIndexStatus.Text = string.Empty; }); }
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────
     // 포맷 헬퍼
     // ─────────────────────────────────────────────────────────
     private static string FormatSize(long bytes) => bytes switch
@@ -914,6 +1225,7 @@ public partial class MainForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         _debounceTimer.Stop(); _debounceTimer.Dispose();
+        _autoIndexTimer?.Stop(); _autoIndexTimer?.Dispose();
         _watcher.Dispose(); _db.Dispose();
         _settings.WindowMaximized = (WindowState == FormWindowState.Maximized);
         if (WindowState == FormWindowState.Normal)

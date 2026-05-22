@@ -26,6 +26,15 @@ public sealed class FileWatcher : IDisposable
     private readonly object _lock    = new();
     private          bool   _disposed;
 
+    /// <summary>
+    /// FileSystemWatcher 가 마지막 리셋 이후 파일 변경(생성·수정·삭제·이름변경)을
+    /// 하나라도 감지했으면 true. 타이머 기반 증분 인덱싱의 실행 조건으로 사용한다.
+    /// </summary>
+    public bool HasPendingChanges { get; private set; }
+
+    /// <summary>증분 인덱싱 완료 후 플래그를 초기화한다.</summary>
+    public void ResetPendingChanges() => HasPendingChanges = false;
+
     public FileWatcher(Indexer indexer, AppSettings settings)
     {
         _indexer  = indexer;
@@ -130,6 +139,7 @@ public sealed class FileWatcher : IDisposable
     private void OnCreated(object sender, FileSystemEventArgs e)
     {
         if (_disposed || IsDirectory(e.FullPath)) return;
+        HasPendingChanges = true;
         Debounce(e.FullPath,
             () => _indexer.IndexSingleFileAsync(e.FullPath));
     }
@@ -137,6 +147,7 @@ public sealed class FileWatcher : IDisposable
     private void OnChanged(object sender, FileSystemEventArgs e)
     {
         if (_disposed || IsDirectory(e.FullPath)) return;
+        HasPendingChanges = true;
         Debounce(e.FullPath,
             () => _indexer.IndexSingleFileAsync(e.FullPath));
     }
@@ -145,6 +156,7 @@ public sealed class FileWatcher : IDisposable
     {
         // 삭제 시점엔 경로가 사라졌으므로 IsDirectory 검사 생략
         if (_disposed) return;
+        HasPendingChanges = true;
         Debounce(e.FullPath, () =>
         {
             _indexer.RemoveFile(e.FullPath);
@@ -155,6 +167,7 @@ public sealed class FileWatcher : IDisposable
     private void OnRenamed(object sender, RenamedEventArgs e)
     {
         if (_disposed) return;
+        HasPendingChanges = true;
         Debounce(e.FullPath, async () =>
         {
             // 이전 경로 제거 후 새 경로 인덱싱 (디렉터리 이름 변경이면 인덱싱 스킵)
@@ -190,6 +203,7 @@ public sealed class FileWatcher : IDisposable
     {
         try
         {
+            HasPendingChanges = true;   // 버퍼 오버플로 → 전체 재동기화 필요
             await _indexer.UpdateIndexAsync();
         }
         catch
