@@ -75,7 +75,7 @@ public sealed class SplashForm : Form
         // 버전
         using var fntVer = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
         using var brVer  = new SolidBrush(Color.FromArgb(140, 170, 220));
-        g.DrawString("v1.0", fntVer, brVer,
+        g.DrawString("v1.1", fntVer, brVer,
             new RectangleF(0, 126, rc.Width, 20), sfCenter);
 
         // "시작 중..."  점 애니메이션
