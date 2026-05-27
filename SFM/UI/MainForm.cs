@@ -196,6 +196,12 @@ public partial class MainForm : Form
             {
                 StartFirstRunIndex();
             }
+            else if (!_settings.EnableContentIndexing)
+            {
+                // Stage 1(파일명)은 완료됐으나 Stage 2(내용 학습)가 중단된 상태.
+                // → 앱 재시작 시 백그라운드에서 자동 재개.
+                ResumeContentIndexing();
+            }
         };
     }
 
@@ -1776,6 +1782,26 @@ public partial class MainForm : Form
             catch (OperationCanceledException) { /* 정상 종료 */ }
             catch (Exception ex)               { Debug.WriteLine($"[BuildIndex] {ex}"); }
         }, ct1);
+    }
+
+    /// <summary>
+    /// Stage 1(파일명) 완료 후 Stage 2(내용 학습)가 중단된 채 재시작된 경우,
+    /// 백그라운드에서 내용 인덱싱을 이어서 진행한다.
+    /// IndexCompleted 핸들러의 _isFirstRunStage2 분기가 완료 처리(체크박스 활성화 등)를 담당한다.
+    /// </summary>
+    private void ResumeContentIndexing()
+    {
+        _isIndexing       = true;
+        _isFirstRunStage2 = true;
+        sslIndexStatus.Text = "📄 이전에 중단된 내용 학습을 재개합니다…";
+
+        var ct = _indexCts.Token;
+        _ = Task.Run(async () =>
+        {
+            try   { await _indexer.BuildMissingContentAsync(ct); }
+            catch (OperationCanceledException) { /* 정상 종료 */ }
+            catch (Exception ex)               { Debug.WriteLine($"[ContentIndexResume] {ex}"); }
+        }, ct);
     }
 
     private void ShowFirstRunOverlay()
