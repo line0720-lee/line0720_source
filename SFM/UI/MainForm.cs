@@ -134,8 +134,8 @@ public partial class MainForm : Form
         InitPagination();
 
         // ── 이벤트 연결 전에 내용 검색 UI 초기화 ────────────────────────────────
-        // EnableContentSearch = false (첫 실행 또는 내용 학습 미완료): 체크박스 숨김
-        // EnableContentSearch = true  (내용 학습 완료 후):              체크박스 표시
+        // EnableContentSearch = false (첫 실행 또는 내용 학습 미완료): 체크박스 비활성(회색)
+        // EnableContentSearch = true  (내용 학습 완료 후):              체크박스 활성화
         // EnableContentIndexing 이 true 라도 내용 검색이 꺼져 있으면 인덱싱도 막는다.
         if (!_settings.EnableContentSearch)
             _settings.EnableContentIndexing = false;   // 메모리만 변경 — 저장 안 함
@@ -367,6 +367,7 @@ public partial class MainForm : Form
         {
             _settings.EnableContentSearch = chkContent.Checked;
             tsmiSearchContent.Checked     = chkContent.Checked;
+            _settings.Save();   // 체크 상태를 즉시 저장 — 재시작 후에도 유지
             _ = RunSearchAsync();
         };
         EventHandler typeChanged = (_, _) => _ = RunSearchAsync();
@@ -1497,8 +1498,15 @@ public partial class MainForm : Form
 
         // ③ 설정 초기화: LastIndexedAt = null → 첫 실행으로 인식
         _settings.LastIndexedAt         = null;
+        _settings.EnableContentSearch   = false;   // 내용 인덱스 삭제 → 내용 검색 비활성화
         _settings.EnableContentIndexing = false;
         _settings.Save();
+
+        // 내용 검색 체크박스 리셋 (DB 초기화로 내용 인덱스가 없으므로 비활성화)
+        chkContent.Checked         = false;
+        tsmiSearchContent.Checked  = false;
+        chkContent.Enabled         = false;
+        tsmiSearchContent.Enabled  = false;
 
         // ④ 검색 결과 초기화
         _results = []; _searchPage = 0; _totalCount = -1; _lastKeyword = string.Empty;
