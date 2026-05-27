@@ -35,18 +35,19 @@ public sealed class Searcher
         bool isWildcard   = HasWildcard(keyword);
         bool hasChoSeong  = !isWildcard && KoreanUtil.HasChoSeong(keyword);
 
+        // ConfigureAwait(false) : 서브 메서드 내부 await 이후 코드가 UI 스레드로 돌아오지 않도록
         List<SearchResult> results = isWildcard
-            ? await SearchWildcardAsync(keyword, query)
+            ? await SearchWildcardAsync(keyword, query).ConfigureAwait(false)
             : hasChoSeong
-                ? await SearchWithChoSeongAsync(keyword, query)
-                : await SearchRegularAsync(keyword, query);
+                ? await SearchWithChoSeongAsync(keyword, query).ConfigureAwait(false)
+                : await SearchRegularAsync(keyword, query).ConfigureAwait(false);
 
-        // 검색 히스토리 저장 (fire-and-forget, 락 보호)
-        _ = Task.Run(() =>
+        // 검색 히스토리 저장 (fire-and-forget, 비동기 락 — 스레드풀 스레드 블로킹 방지)
+        _ = Task.Run(async () =>
         {
             try
             {
-                _db.DbLock.Wait();
+                await _db.DbLock.WaitAsync().ConfigureAwait(false);
                 try { _db.SaveSearchHistory(keyword, query.SearchInContent && !hasChoSeong && !isWildcard); }
                 finally { _db.DbLock.Release(); }
             }
@@ -83,7 +84,7 @@ public sealed class Searcher
                 _db.DbLock.Wait();
                 try { return _db.CountSearchFiltered(likePat, null, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore); }
                 finally { _db.DbLock.Release(); }
-            });
+            }).ConfigureAwait(false);
         }
 
         // 일반 검색: 이름이 keyword 로 시작하는 파일 (abc → abc%)
@@ -95,7 +96,7 @@ public sealed class Searcher
             _db.DbLock.Wait();
             try { return _db.CountSearchFiltered(nameLike, ftsQuery, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore); }
             finally { _db.DbLock.Release(); }
-        });
+        }).ConfigureAwait(false);
     }
 
     // ─────────────────────────────────────────────────────────
@@ -117,7 +118,7 @@ public sealed class Searcher
             _db.DbLock.Wait();
             try { return _db.SearchByNameFiltered(likePattern, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, query.MaxResults, dbOffset); }
             finally { _db.DbLock.Release(); }
-        });
+        }).ConfigureAwait(false);
 
         return Sort(
             nameHits.Select(f => ToResult(f, string.Empty, matchedName: true, matchedContent: false)),
@@ -140,7 +141,7 @@ public sealed class Searcher
             _db.DbLock.Wait();
             try { return _db.SearchByNameFiltered($"{EscapeLike(keyword)}%", query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, query.MaxResults, dbOffset); }
             finally { _db.DbLock.Release(); }
-        });
+        }).ConfigureAwait(false);
 
         var map = new Dictionary<string, SearchResult>(StringComparer.OrdinalIgnoreCase);
         foreach (var f in nameHits)
@@ -155,7 +156,7 @@ public sealed class Searcher
                 _db.DbLock.Wait();
                 try { return _db.SearchByContentFiltered(ftsQuery, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, query.MaxResults, dbOffset); }
                 finally { _db.DbLock.Release(); }
-            });
+            }).ConfigureAwait(false);
 
             foreach (var (file, rawSnippet) in contentHits)
             {
@@ -197,7 +198,7 @@ public sealed class Searcher
                 _db.DbLock.Wait();
                 try { return _db.GetRecentFiles(query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, limit); }
                 finally { _db.DbLock.Release(); }
-            });
+            }).ConfigureAwait(false);
         }
         else
         {
@@ -208,7 +209,7 @@ public sealed class Searcher
                 _db.DbLock.Wait();
                 try { return _db.SearchByNameFiltered(likePattern, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, Math.Min(query.MaxResults * 5, 5_000)); }
                 finally { _db.DbLock.Release(); }
-            });
+            }).ConfigureAwait(false);
         }
 
         // C# 초성 패턴 매칭

@@ -423,72 +423,84 @@ public sealed class Indexer
     {
         var sw = Stopwatch.StartNew();
 
-        // DB 에서 내용 미인덱싱 파일 목록 수집 (락 보호)
-        List<FileIndex> files;
-        await _db.DbLock.WaitAsync(ct).ConfigureAwait(false);
+        // FileWatcher 의 IndexSingleFileAsync / RemoveFile 이 동시에 실행되면
+        // IndexCompleted 이벤트가 Stage 2 도중 발생 → UI 스레드에서 DB 접근 경합 → 응답없음
+        // _isBulkIndexing = true 로 설정하여 이 경로를 완전히 차단한다.
+        _isBulkIndexing = true;
+        int total = 0, added = 0;
+
         try
         {
-            files = _db.GetAllIndexedFiles()
-                .Where(f => !f.HasContent
-                    && _contentIndexExts.Contains(Path.GetExtension(f.FilePath)))
-                .ToList();
-        }
-        finally { _db.DbLock.Release(); }
+            // DB 에서 내용 미인덱싱 파일 목록 수집 (락 보호)
+            List<FileIndex> files;
+            await _db.DbLock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                files = _db.GetAllIndexedFiles()
+                    .Where(f => !f.HasContent
+                        && _contentIndexExts.Contains(Path.GetExtension(f.FilePath)))
+                    .ToList();
+            }
+            finally { _db.DbLock.Release(); }
 
-        int total = files.Count;
-        int added = 0;
+            total = files.Count;
 
-        // 내용 파싱은 CPU/IO 집약적 → 100건 소배치
-        // 파싱(락 불필요)과 DB 저장(락 필요)을 분리하여 검색 지연 최소화
-        const int ContentBatch = 100;
+            // 내용 파싱은 CPU/IO 집약적 → 100건 소배치
+            // 파싱(락 불필요)과 DB 저장(락 필요)을 분리하여 검색 지연 최소화
+            const int ContentBatch = 100;
 
-        for (int batchStart = 0; batchStart < files.Count; batchStart += ContentBatch)
-        {
-            ct.ThrowIfCancellationRequested();
-            int batchEnd = Math.Min(batchStart + ContentBatch, files.Count);
-
-            // ── Step 1: 파일 내용 파싱 (락 없이 실행) ─────────────
-            // ConfigureAwait(false) → 쓰레드풀에서 실행, UI 스레드 점유 없음
-            var parsed = new List<(FileIndex File, string Content)>();
-            for (int i = batchStart; i < batchEnd; i++)
+            for (int batchStart = 0; batchStart < files.Count; batchStart += ContentBatch)
             {
                 ct.ThrowIfCancellationRequested();
-                var file = files[i];
-                try
-                {
-                    var content = await _parser.ParseFileContent(file.FilePath, _settings.MaxFileSizeMB)
-                                               .ConfigureAwait(false);
-                    if (!string.IsNullOrWhiteSpace(content))
-                        parsed.Add((file, content));
-                }
-                catch (Exception ex) { RaiseError(file.FilePath, ex); }
+                int batchEnd = Math.Min(batchStart + ContentBatch, files.Count);
 
-                RaiseProgress(file.FilePath, i + 1, total, "내용 인덱싱");
-            }
-
-            // ── Step 2: DB 저장 (락 보호, 쓰레드풀에서 실행) ──────
-            if (parsed.Count > 0)
-            {
-                await _db.DbLock.WaitAsync(ct).ConfigureAwait(false);
-                try
+                // ── Step 1: 파일 내용 파싱 (락 없이 실행) ─────────────
+                // ConfigureAwait(false) → 쓰레드풀에서 실행, UI 스레드 점유 없음
+                var parsed = new List<(FileIndex File, string Content)>();
+                for (int i = batchStart; i < batchEnd; i++)
                 {
-                    using var tx = _db.BeginTransaction();
+                    ct.ThrowIfCancellationRequested();
+                    var file = files[i];
                     try
                     {
-                        foreach (var (file, content) in parsed)
-                        {
-                            _db.InsertOrUpdateContent(file.Id, content, tx);
-                            added++;
-                        }
-                        tx.Commit();
+                        var content = await _parser.ParseFileContent(file.FilePath, _settings.MaxFileSizeMB)
+                                                   .ConfigureAwait(false);
+                        if (!string.IsNullOrWhiteSpace(content))
+                            parsed.Add((file, content));
                     }
-                    catch (OperationCanceledException) { tx.Rollback(); throw; }
-                    catch { tx.Rollback(); }
-                }
-                finally { _db.DbLock.Release(); }
-            }
+                    catch (Exception ex) { RaiseError(file.FilePath, ex); }
 
-            await Task.Yield(); // 배치 사이 검색 실행 기회
+                    RaiseProgress(file.FilePath, i + 1, total, "내용 인덱싱");
+                }
+
+                // ── Step 2: DB 저장 (락 보호, 쓰레드풀에서 실행) ──────
+                if (parsed.Count > 0)
+                {
+                    await _db.DbLock.WaitAsync(ct).ConfigureAwait(false);
+                    try
+                    {
+                        using var tx = _db.BeginTransaction();
+                        try
+                        {
+                            foreach (var (file, content) in parsed)
+                            {
+                                _db.InsertOrUpdateContent(file.Id, content, tx);
+                                added++;
+                            }
+                            tx.Commit();
+                        }
+                        catch (OperationCanceledException) { tx.Rollback(); throw; }
+                        catch { tx.Rollback(); }
+                    }
+                    finally { _db.DbLock.Release(); }
+                }
+
+                await Task.Yield(); // 배치 사이 검색 실행 기회
+            }
+        }
+        finally
+        {
+            _isBulkIndexing = false;
         }
 
         sw.Stop();

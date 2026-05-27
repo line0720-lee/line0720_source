@@ -1514,15 +1514,34 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     // DB 통계
     // ─────────────────────────────────────────────────────────
+    /// <summary>
+    /// DB 통계를 백그라운드에서 읽어 UI 를 갱신한다 (fire-and-forget).
+    /// GetIndexStats() 를 UI 스레드에서 직접 호출하면 Stage 2 가 DbLock 을 보유한 채
+    /// FTS5 트랜잭션을 처리하는 동안 SQLite 내부 뮤텍스가 UI 스레드를 블로킹하여
+    /// "응답없음" 이 발생한다. Task.Run + DbLock 으로 완전히 분리한다.
+    /// </summary>
     private void RefreshDbStats()
     {
-        try
+        _ = Task.Run(async () =>
         {
-            var s = _db.GetIndexStats();
-            lblDbInfo.Text  = $"인덱스: {s.TotalFiles:N0}개 파일  ·  {s.DatabaseSizeMb:F1} MB";
-            sslDbStats.Text = $"인덱스: {s.TotalFiles:N0}개 파일 ({s.DatabaseSizeMb:F1} MB)";
-        }
-        catch { }
+            try
+            {
+                if (IsDisposed) return;
+                await _db.DbLock.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    var s = _db.GetIndexStats();
+                    if (!IsDisposed && IsHandleCreated)
+                        BeginInvoke(() =>
+                        {
+                            lblDbInfo.Text  = $"인덱스: {s.TotalFiles:N0}개 파일  ·  {s.DatabaseSizeMb:F1} MB";
+                            sslDbStats.Text = $"인덱스: {s.TotalFiles:N0}개 파일 ({s.DatabaseSizeMb:F1} MB)";
+                        });
+                }
+                finally { _db.DbLock.Release(); }
+            }
+            catch { }
+        });
     }
 
     // ─────────────────────────────────────────────────────────
