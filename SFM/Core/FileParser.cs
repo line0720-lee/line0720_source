@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text;
+using System.IO.Compression;
+using System.Xml.Linq;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using Docnet.Core;
@@ -27,15 +29,24 @@ public sealed class FileParser
         // 소스 코드
         ".cs", ".py", ".js", ".ts", ".java", ".cpp", ".c", ".h",
         ".go", ".rs", ".rb", ".php", ".swift", ".kt",
+        ".pas", ".pc",    // Pascal / Pro*C 소스
         // 마크업·설정
         ".html", ".htm", ".xml", ".json", ".yaml", ".yml",
         ".ini", ".cfg", ".toml", ".css", ".scss", ".sql",
         ".sh", ".bat", ".ps1",
+        // .rtf 는 내용 검색 제외 (서식 마크업 노이즈)
     };
 
     private static readonly HashSet<string> _richDocExts = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".pdf", ".docx", ".xlsx", ".pptx",
+        // Open XML (Office 2007+)
+        ".docx", ".xlsx", ".pptx",
+        // 구형 바이너리 Office (OLE Compound, Office 97–2003)
+        ".doc", ".xls", ".ppt",
+        // PDF
+        ".pdf",
+        // 한글 문서
+        ".hwp", ".hwpx",
     };
 
     // ── 정적 초기화 ──────────────────────────────────────────
@@ -76,7 +87,7 @@ public sealed class FileParser
             if (_plainTextExts.Contains(ext))
             {
                 int readSize = overLimit ? FallbackLimit : (int)info.Length;
-                return await ReadPlainTextAsync(filePath, readSize);
+                return await ReadPlainTextAsync(filePath, readSize).ConfigureAwait(false);
             }
 
             // 리치 문서: 파싱 후 문자 수 제한
@@ -84,10 +95,17 @@ public sealed class FileParser
 
             return ext.ToLowerInvariant() switch
             {
-                ".pdf"  => await ParsePdfAsync(filePath, charLimit),
-                ".docx" => await Task.Run(() => ParseDocx(filePath, charLimit)),
-                ".xlsx" => await Task.Run(() => ParseXlsx(filePath, charLimit)),
-                ".pptx" => await Task.Run(() => ParsePptx(filePath, charLimit)),
+                // PDF
+                ".pdf"  => await ParsePdfAsync(filePath, charLimit).ConfigureAwait(false),
+                // Open XML (Office 2007+)
+                ".docx" => await Task.Run(() => ParseDocx(filePath, charLimit)).ConfigureAwait(false),
+                ".xlsx" => await Task.Run(() => ParseXlsx(filePath, charLimit)).ConfigureAwait(false),
+                ".pptx" => await Task.Run(() => ParsePptx(filePath, charLimit)).ConfigureAwait(false),
+                // 구형 바이너리 Office — OLE Compound 텍스트 흐름 추출
+                ".doc" or ".xls" or ".ppt" => await Task.Run(() => ParseOleBinary(filePath, charLimit)).ConfigureAwait(false),
+                // 한글 문서
+                ".hwpx" => await Task.Run(() => ParseHwpx(filePath, charLimit)).ConfigureAwait(false),
+                ".hwp"  => await Task.Run(() => ParseOleBinary(filePath, charLimit)).ConfigureAwait(false),
                 _       => string.Empty,
             };
         }
@@ -114,7 +132,7 @@ public sealed class FileParser
         int totalRead = 0;
         while (totalRead < readSize)
         {
-            int n = await fs.ReadAsync(buffer, totalRead, readSize - totalRead);
+            int n = await fs.ReadAsync(buffer, totalRead, readSize - totalRead).ConfigureAwait(false);
             if (n == 0) break;
             totalRead += n;
         }
@@ -260,6 +278,128 @@ public sealed class FileParser
             if (sb.Length >= charLimit) break;
         }
         return sb.ToString();
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // HWPX — ZIP 기반 XML (한글 신형 포맷)
+    // ─────────────────────────────────────────────────────────
+
+    private static string ParseHwpx(string filePath, int charLimit)
+    {
+        try
+        {
+            using var zip = ZipFile.OpenRead(filePath);
+            var sb = new StringBuilder();
+
+            // HWPX BodyText 폴더 아래 section 파일들에 단락 텍스트가 들어 있음
+            var sections = zip.Entries
+                .Where(e => e.FullName.StartsWith("BodyText/", StringComparison.OrdinalIgnoreCase)
+                            && e.Name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(e => e.FullName);
+
+            foreach (var entry in sections)
+            {
+                if (sb.Length >= charLimit) break;
+                try
+                {
+                    using var stream = entry.Open();
+                    var doc = XDocument.Load(stream);
+                    // <hh:t> 또는 <t> 요소에 텍스트 내용이 있음
+                    foreach (var t in doc.Descendants()
+                                        .Where(e => e.Name.LocalName == "t"))
+                    {
+                        if (string.IsNullOrWhiteSpace(t.Value)) continue;
+                        sb.AppendLine(t.Value);
+                        if (sb.Length >= charLimit) break;
+                    }
+                }
+                catch { /* 개별 섹션 파싱 실패 → 건너뜀 */ }
+            }
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[FileParser/HWPX] {Path.GetFileName(filePath)}: {ex.Message}");
+            return string.Empty;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // OLE 복합 문서 바이너리 텍스트 추출
+    // 대상: .hwp(한글) / .doc(Word) / .xls(Excel) / .ppt(PowerPoint) 구형 포맷
+    // 모두 OLE Compound File 기반으로 UTF-16LE 텍스트를 저장하므로 동일 로직 사용.
+    // ─────────────────────────────────────────────────────────
+
+    private static string ParseOleBinary(string filePath, int charLimit)
+    {
+        try
+        {
+            using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+                                          FileShare.ReadWrite, 4096);
+
+            // ZIP 시그니처(PK) → 사실상 HWPX 혹은 Open XML로 저장된 파일
+            Span<byte> sig4 = stackalloc byte[4];
+            if (fs.Read(sig4) == 4 && sig4[0] == 0x50 && sig4[1] == 0x4B)
+                return ParseHwpx(filePath, charLimit);
+
+            // OLE 복합 문서 전체를 읽고 UTF-16LE 텍스트 흐름 추출
+            // · ASCII 인쇄 가능 (0x20–0x7E)  ← Word/Excel 영문도 UTF-16LE로 저장
+            // · 완성형 한글 (0xAC00–0xD7A3)
+            // 연속 4자 이상인 흐름만 텍스트로 인정하여 바이너리 노이즈 차단
+            fs.Position = 0;
+            int readSize = (int)Math.Min(fs.Length, 4 * 1024 * 1024); // 최대 4 MB
+            var bytes    = new byte[readSize];
+            int total    = 0;
+            while (total < readSize)
+            {
+                int n = fs.Read(bytes, total, readSize - total);
+                if (n == 0) break;
+                total += n;
+            }
+
+            var sb       = new StringBuilder();
+            int runStart = -1;
+            int runLen   = 0;
+
+            for (int i = 0; i + 1 < total; i += 2)
+            {
+                int cp = bytes[i] | (bytes[i + 1] << 8);
+
+                bool valid = (cp >= 0xAC00 && cp <= 0xD7A3)
+                          || (cp >= 0x20   && cp <= 0x7E)
+                          || cp == '\r' || cp == '\n' || cp == '\t';
+
+                if (valid)
+                {
+                    if (runStart < 0) { runStart = i; runLen = 0; }
+                    runLen++;
+                }
+                else
+                {
+                    if (runLen >= 4)   // 4자 이상만 의미 있는 텍스트로 취급
+                    {
+                        for (int j = runStart; j < runStart + runLen * 2 && j + 1 < total; j += 2)
+                        {
+                            int c = bytes[j] | (bytes[j + 1] << 8);
+                            if ((c >= 0xAC00 && c <= 0xD7A3) || (c >= 0x20 && c <= 0x7E))
+                                sb.Append((char)c);
+                            else if (c == '\n') sb.AppendLine();
+                        }
+                        sb.AppendLine();
+                    }
+                    runStart = -1;
+                    runLen   = 0;
+                }
+
+                if (sb.Length >= charLimit) break;
+            }
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[FileParser/OLE] {Path.GetFileName(filePath)}: {ex.Message}");
+            return string.Empty;
+        }
     }
 
     // ─────────────────────────────────────────────────────────

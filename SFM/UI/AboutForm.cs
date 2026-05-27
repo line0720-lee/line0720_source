@@ -210,7 +210,7 @@ internal sealed class AboutForm : Form
             Brushes.White, new PointF(98, 14));
 
         // 부제목
-        g.DrawString("Smart File Manager  v1.0",
+        g.DrawString("Smart File Manager  v1.1",
             new Font("Segoe UI", 10F),
             new SolidBrush(Color.FromArgb(180, 210, 255)),
             new PointF(100, 62));

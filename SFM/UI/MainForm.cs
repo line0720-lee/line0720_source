@@ -27,28 +27,47 @@ public partial class MainForm : Form
     // UI 상태
     // ─────────────────────────────────────────────────────────
     private List<SearchResult> _results     = [];
-    private int                _currentPage = 0;
+    private int                _searchPage  = 0;    // 무한 스크롤 현재 페이지
+    private long               _totalCount  = -1;   // 전체 검색 건수 (-1 = 미계산)
+    private bool               _isLoadingMore = false;
     private string             _lastKeyword = string.Empty;
 
-    private ToolStripButton _sslPrevPage = null!;
-    private ToolStripButton _sslNextPage = null!;
+    // IndexProgressChanged 쓰로틀링 (백그라운드 내용 인덱싱 깜빡임 방지)
+    private long _lastProgressTickMs = 0;
 
     private readonly System.Windows.Forms.Timer _debounceTimer;
     private readonly ListBox                    _recentBox;
+
+    // ListView 셀 툴팁 (이름·경로 열 전체 텍스트 표시)
+    private readonly ToolTip _cellTip = new() { AutoPopDelay = 8000, InitialDelay = 400, ReshowDelay = 200 };
+    private int              _cellTipLastRow = -1;
+    private int              _cellTipLastCol = -1;
+
+    // 검색 힌트 팝업 (? 버튼 호버)
+    private SearchHintPopup?            _hintPopup;
+    private System.Windows.Forms.Timer? _hintHideTimer;
+
+    // IndexCompleted 자동 재검색 쿨다운 (15초)
+    private DateTime _lastAutoReSearch = DateTime.MinValue;
 
     // 컬럼 정렬
     private int  _sortColumn    = -1;
     private bool _sortAscending = true;
     private readonly string[] _colHeaders = ["이름", "경로", "파일 크기", "수정 날짜", "유형"];
 
+
     // ─────────────────────────────────────────────────────────
     // 파일유형 필터
     // ─────────────────────────────────────────────────────────
-    private static readonly string[] ExtDoc   = [".docx",".doc",".xlsx",".xls",".pptx",".ppt",".txt",".md",".rtf"];
+    // 문서 (한글 HWP/HWPX 포함)
+    private static readonly string[] ExtDoc   = [".docx",".doc",".xlsx",".xls",".pptx",".ppt",
+                                                  ".txt",".md",".rtf",".hwp",".hwpx"];
     private static readonly string[] ExtPdf   = [".pdf"];
     private static readonly string[] ExtImage = [".jpg",".jpeg",".png",".gif",".bmp",".svg",".webp",".ico"];
+    // 소스 코드 (Pascal .pas, Pro*C .pc 포함)
     private static readonly string[] ExtCode  = [".cs",".py",".js",".ts",".java",".cpp",".c",".h",
                                                   ".go",".rs",".rb",".php",".swift",".kt",
+                                                  ".pas",".pc",
                                                   ".html",".htm",".css",".scss",".sql",".sh",".bat",".ps1"];
 
     // 확장자 → imgListSmall 인덱스 (Windows 셸 아이콘 캐시)
@@ -59,6 +78,15 @@ public partial class MainForm : Form
     private bool _isIndexing = false;
     private int  _autoIndexCycle = 0;          // 5분 주기 카운터 (6회 = 30분마다 Vacuum)
     private System.Windows.Forms.Timer? _autoIndexTimer;
+
+    /// <summary>인덱서 백그라운드 작업 전체를 취소하는 토큰. 폼 종료 시 Cancel.</summary>
+    private readonly CancellationTokenSource _indexCts = new();
+
+    // 첫 실행 인덱싱 상태 추적
+    private bool _isFirstRunStage1  = false;   // 1단계: 파일명+메타 인덱싱 중
+    private bool _isFirstRunStage2  = false;   // 2단계: 문서 내용 학습 중 (백그라운드)
+    private bool _firstRunCompleted = false;   // 완료 상태 — true 면 HideFirstRunOverlay 자동 호출 차단
+    private bool _isClosing         = false;   // OnFormClosed 이중 실행 방지
 
     private string[] GetSelectedExtensions()
     {
@@ -73,9 +101,13 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     // 생성자
     // ─────────────────────────────────────────────────────────
-    public MainForm()
+    private readonly SplashForm? _splash;
+
+    public MainForm(SplashForm? splash = null)
     {
+        _splash = splash;
         InitializeComponent();
+        EnableAntiFlicker();          // ← 깜빡임 방지 (InitializeComponent 직후)
         Icon = CreateAppIcon();
 
         _settings = AppSettings.Load();
@@ -101,9 +133,20 @@ public partial class MainForm : Form
         InitImageList();
         InitPagination();
 
-        // ── 이벤트 연결 전에 초기 UI 상태를 설정 (CheckedChanged 이벤트 오발 방지) ──
+        // ── 이벤트 연결 전에 내용 검색 UI 초기화 ────────────────────────────────
+        // EnableContentSearch = false (첫 실행 또는 내용 학습 미완료): 체크박스 숨김
+        // EnableContentSearch = true  (내용 학습 완료 후):              체크박스 표시
+        // EnableContentIndexing 이 true 라도 내용 검색이 꺼져 있으면 인덱싱도 막는다.
+        if (!_settings.EnableContentSearch)
+            _settings.EnableContentIndexing = false;   // 메모리만 변경 — 저장 안 함
+
+        // 내용 검색 UI — 항상 표시하되, 내용 학습 완료 전까지 비활성(회색)
         chkContent.Checked         = _settings.EnableContentSearch;
         tsmiSearchContent.Checked  = _settings.EnableContentSearch;
+        chkContent.Visible         = true;
+        tsmiSearchContent.Visible  = true;
+        chkContent.Enabled         = _settings.EnableContentSearch;
+        tsmiSearchContent.Enabled  = _settings.EnableContentSearch;
 
         // 오버레이 카드 Paint — 둥근 테두리
         pnlOverlayCard.Paint += OnOverlayCardPaint;
@@ -137,34 +180,69 @@ public partial class MainForm : Form
                     splitPreview.Width - splitPreview.Panel2MinSize - splitPreview.SplitterWidth);
             }
             catch { /* 방어적 처리 */ }
+        };
+
+        // 스플래시 닫기 + 첫 실행 오버레이는 Shown 이벤트에서 처리.
+        // Load 단계에서는 폼이 아직 화면에 표시되지 않아 오버레이가 렌더링되지 않는다.
+        Shown += (_, _) =>
+        {
+            // 스플래시 닫기 — MainForm이 화면에 완전히 표시된 후
+            try { _splash?.Close(); } catch { /* 무시 */ }
+
+            // 열 너비 초기화 — 폼이 완전히 표시된 후 ClientSize 가 확정되므로 여기서 실행
+            if (_settings.AutoResizeColumns) AutoResizeColumns();
 
             // 첫 실행 감지: LastIndexedAt == null → 자동 인덱싱 시작
             if (_settings.LastIndexedAt == null)
             {
                 StartFirstRunIndex();
             }
-            else if (_settings.EnableContentIndexing)
-            {
-                // 이미 인덱스는 있지만 내용이 한 건도 없는 경우
-                // (이전 버전에서 EnableContentIndexing=false 로 인덱싱한 경우 등)
-                // → 백그라운드에서 내용만 추가 인덱싱
-                try
-                {
-                    var stats = _db.GetIndexStats();
-                    if (stats.TotalFiles > 0 && stats.ContentIndexedFiles == 0)
-                    {
-                        sslIndexStatus.Text = "내용 인덱싱 시작 (백그라운드)…";
-                        _isIndexing = true;
-                        _ = _indexer.BuildMissingContentAsync();
-                    }
-                }
-                catch { /* DB 통계 조회 실패 → 무시 */ }
-            }
         };
     }
 
     // ─────────────────────────────────────────────────────────
     // 창 위치 복원
+    // ─────────────────────────────────────────────────────────
+    // 깜빡임 방지 — 더블 버퍼링 활성화
+    // ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Windows 10에서 발생하는 ListView / 패널 깜빡임을 제거한다.
+    /// · ListView: 네이티브 LVS_EX_DOUBLEBUFFER (가장 효과적)
+    /// · Panel류: 리플렉션으로 DoubleBuffered=true
+    /// </summary>
+    private void EnableAntiFlicker()
+    {
+        // ── ListView 네이티브 더블 버퍼링 ─────────────────────
+        // Handle을 사용하려면 InitializeComponent 이후여야 함
+        NativeMethods.SendMessage(
+            listResults.Handle,
+            NativeMethods.LVM_SETEXTENDEDLISTVIEWSTYLE,
+            NativeMethods.LVS_EX_DOUBLEBUFFER,
+            NativeMethods.LVS_EX_DOUBLEBUFFER);
+
+        // ── 관리 코드 DoubleBuffered (Panel / SplitterPanel) ──
+        SetDoubleBuffered(listResults);
+        SetDoubleBuffered(pnlSearch);
+        SetDoubleBuffered(pnlOptions);
+        SetDoubleBuffered(pnlSnippet);
+        SetDoubleBuffered(pnlSnippetBar);
+        SetDoubleBuffered(pnlOverlay);
+        SetDoubleBuffered(pnlOverlayCard);
+        SetDoubleBuffered(splitPreview.Panel1);
+        SetDoubleBuffered(splitPreview.Panel2);
+    }
+
+    /// <summary>리플렉션으로 내부 DoubleBuffered 속성을 true 로 설정한다.</summary>
+    private static void SetDoubleBuffered(Control ctrl)
+    {
+        typeof(Control)
+            .GetProperty("DoubleBuffered",
+                System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Instance)
+            ?.SetValue(ctrl, true);
+    }
+
     // ─────────────────────────────────────────────────────────
     private void RestoreWindowBounds()
     {
@@ -260,19 +338,9 @@ public partial class MainForm : Form
     }
 
     // ─────────────────────────────────────────────────────────
-    // 페이지네이션
+    // 페이지네이션 (무한 스크롤로 대체 — 버튼 없음)
     // ─────────────────────────────────────────────────────────
-    private void InitPagination()
-    {
-        _sslPrevPage = new ToolStripButton("◀")
-        { Enabled = false, Alignment = ToolStripItemAlignment.Right, ToolTipText = "이전 페이지 (Alt+←)", Padding = new Padding(4,0,4,0) };
-        _sslNextPage = new ToolStripButton("▶")
-        { Enabled = false, Alignment = ToolStripItemAlignment.Right, ToolTipText = "다음 페이지 (Alt+→)", Padding = new Padding(4,0,4,0) };
-
-        _sslPrevPage.Click += (_, _) => { if (_currentPage > 0) { _currentPage--; _ = RunSearchAsync(); } };
-        _sslNextPage.Click += (_, _) => { _currentPage++; _ = RunSearchAsync(); };
-        statusStrip.Items.AddRange([_sslPrevPage, _sslNextPage]);
-    }
+    private static void InitPagination() { /* ◀▶ 버튼 제거. 무한 스크롤은 ExtListView.NearBottom 으로 처리. */ }
 
     // ─────────────────────────────────────────────────────────
     // 이벤트 연결
@@ -313,6 +381,16 @@ public partial class MainForm : Form
         listResults.KeyDown              += OnListKeyDown;
         listResults.SelectedIndexChanged += OnListSelectionChanged;
         listResults.ColumnClick          += OnColumnClick;
+        listResults.MouseMove            += OnListMouseMove;
+        listResults.MouseLeave           += (_, _) => { _cellTip.SetToolTip(listResults, null); _cellTipLastRow = -1; _cellTipLastCol = -1; };
+
+        // ── 무한 스크롤 (ExtListView.NearBottom) ─────────────────
+        listResults.NearBottom += (_, _) =>
+        {
+            // 더 불러올 결과가 있고 현재 로딩 중이 아닌 경우에만 추가 로드
+            if (!_isLoadingMore && (_totalCount < 0 || _results.Count < _totalCount))
+                _ = LoadMoreResultsAsync();
+        };
 
         // ── ContextMenu ───────────────────────────────────────────
         cmsResult.Opening += (_, e) =>
@@ -334,6 +412,10 @@ public partial class MainForm : Form
         tsmiCopyDir.Click         += (_, _) => CopySelectedDirs();
         tsmiCopyName.Click        += (_, _) => CopySelectedNames();
         tsmiDeleteFromIndex.Click += OnDeleteFromIndex;
+
+        // ── 검색 힌트 (?) 버튼 ──────────────────────────────────────
+        btnSearchHint.MouseEnter += OnSearchHintMouseEnter;
+        btnSearchHint.MouseLeave += OnSearchHintMouseLeave;
 
         // ── 스니펫 닫기 ──────────────────────────────────────────
         btnSnippetClose.Click += (_, _) =>
@@ -358,58 +440,199 @@ public partial class MainForm : Form
             if (tsmiViewAutoCol.Checked) AutoResizeColumns();
         };
 
+        // ── 창 크기 변경 / 스플리터 이동 → 열 너비 자동 재조정 ─────
+        SizeChanged += (_, _) =>
+        {
+            if (tsmiViewAutoCol.Checked) BeginInvoke(AutoResizeColumns);
+        };
+        splitPreview.SplitterMoved += (_, _) =>
+        {
+            if (tsmiViewAutoCol.Checked) AutoResizeColumns();
+        };
+
         tsmiSearchContent.Click += (_, _) => chkContent.Checked = tsmiSearchContent.Checked;
         tsmiSearchClear.Click   += (_, _) => { txtSearch.Clear(); txtSearch.Focus(); };
 
-        tsmiToolsReindex.Click += OnReindexClick;
-        tsmiToolsVacuum.Click  += OnVacuumClick;
+        tsmiToolsReindex.Click    += OnReindexClick;
+        tsmiToolsVacuum.Click     += OnVacuumClick;
+        tsmiToolsResetIndex.Click += OnResetIndexClick;
+
+        // ── 오버레이 닫기 버튼 ───────────────────────────────────
+        // 사용자가 직접 닫는 경우: 플래그 해제 후 강제 숨김
+        btnOverlayClose.Click += (_, _) =>
+        {
+            _firstRunCompleted      = false;
+            btnOverlayClose.Visible = false;
+            pnlOverlay.Visible      = false;
+            txtSearch.Focus();
+        };
 
         tsmiHelpAbout.Click += (_, _) => new AboutForm().ShowDialog(this);
 
         // ── Indexer 이벤트 ───────────────────────────────────────
-        _indexer.IndexProgressChanged += p => Invoke(() =>
+        // IsDisposed / IsHandleCreated 가드: 폼이 닫힌 뒤 백그라운드 스레드가
+        // Invoke를 호출하면 ObjectDisposedException 발생 → 사전 차단
+        _indexer.IndexProgressChanged += p =>
         {
-            sslIndexStatus.Text = $"[{p.Phase}] {p.Processed:N0}/{p.Total:N0}  {Path.GetFileName(p.FilePath)}";
-            // 첫 실행 오버레이 진행 표시
-            if (pnlOverlay.Visible)
-            {
-                lblOverlayProgress.Text = p.Total > 0
-                    ? $"{p.Processed:N0} / {p.Total:N0} 파일 처리 중..."
-                    : $"{p.Processed:N0} 파일 처리 중...";
-            }
-        });
+            if (IsDisposed || !IsHandleCreated) return;
 
-        _indexer.IndexCompleted += r => Invoke(() =>
+            // ── 쓰로틀링 ─────────────────────────────────────────────
+            // · 오버레이 표시 중(1단계 파일명 인덱싱): 항상 업데이트 (사용자에게 진행 보여줌)
+            // · 백그라운드 내용 인덱싱(2단계): 200 ms 마다만 업데이트 → 깜빡임 방지
+            var now = Environment.TickCount64;
+            if (!_isFirstRunStage1 && now - _lastProgressTickMs < 200) return;
+            _lastProgressTickMs = now;
+
+            try
+            {
+                // BeginInvoke: 백그라운드 스레드를 UI 완료까지 블로킹하지 않음
+                BeginInvoke(() =>
+                {
+                    sslIndexStatus.Text = $"[{p.Phase}] {p.Processed:N0}/{p.Total:N0}  {Path.GetFileName(p.FilePath)}";
+                    // 오버레이 진행 표시: 1단계(파일명 인덱싱) 중에만 업데이트.
+                    // 2단계(내용 학습) 중에는 오버레이가 완료 상태이므로 건드리지 않는다.
+                    if (pnlOverlay.Visible && _isFirstRunStage1)
+                    {
+                        if (p.Total > 0)
+                        {
+                            // 총 파일 수 확정 → Marquee → Continuous 퍼센트 진행 바로 전환
+                            if (pbOverlay.Style != ProgressBarStyle.Continuous)
+                                pbOverlay.Style = ProgressBarStyle.Continuous;
+
+                            int pct = Math.Clamp((int)((double)p.Processed / p.Total * 100), 0, 100);
+                            pbOverlay.Value = pct;
+
+                            // 진행 텍스트: 수집 완료 직후(Processed=0)와 인덱싱 중 구분
+                            lblOverlayProgress.Text = p.Processed == 0
+                                ? $"총 {p.Total:N0}개 파일 발견.  분석을 시작합니다..."
+                                : $"{p.Processed:N0} / {p.Total:N0} 파일 처리 중... ({pct}%)";
+
+                            // 단계별 설명 문구
+                            lblOverlayDesc.Text = p.Phase switch
+                            {
+                                "수집 완료" => "파일 분석을 시작합니다...",
+                                "인덱싱"   => "파일 이름과 정보를 인덱싱하고 있습니다...",
+                                var s when s.Contains("내용") => "파일 내용을 분석하고 있습니다...",
+                                _ => "검색 인덱스를 구축하고 있습니다..."
+                            };
+                        }
+                        else
+                        {
+                            // Total=0: 아직 파일 목록 수집 중 (Marquee 유지)
+                            lblOverlayProgress.Text = $"파일 목록 수집 중...  {p.Processed:N0}개 발견";
+                            lblOverlayDesc.Text     = "파일 목록을 수집하고 있습니다...";
+                        }
+                    }
+                });
+            }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
+        };
+
+        _indexer.IndexCompleted += r =>
         {
-            _isIndexing = false;
-            HideFirstRunOverlay();   // 첫 실행 오버레이가 떠 있으면 닫음
-
-            bool hasRealChanges = r.Added + r.Updated + r.Deleted > 0;
-
-            if (hasRealChanges)
+            if (IsDisposed || !IsHandleCreated) return;
+            try
             {
-                // 실제 변경이 있을 때만 상태 갱신·저장
-                sslIndexStatus.Text = $"완료 {r.TotalIndexed:N0}개  +{r.Added} ~{r.Updated} -{r.Deleted}  {r.Elapsed.TotalSeconds:F1}s";
+                Invoke(() =>
+                {
+                    _isIndexing = false;
 
-                var now = DateTime.Now;
-                _settings.LastIndexedAt = now;
-                _settings.Save();
-                sslLastIndexed.Text = $"인덱싱: {now:yyyy-MM-dd HH:mm}";
+                    // ── 첫 실행 1단계(파일명 인덱싱) 완료 ────────────────────
+                    if (_isFirstRunStage1)
+                    {
+                        _isFirstRunStage1 = false;
 
-                RefreshDbStats();
+                        var now1 = DateTime.Now;
+                        _settings.LastIndexedAt = now1;
+                        _settings.Save();
+                        sslLastIndexed.Text = $"인덱싱: {now1:yyyy-MM-dd HH:mm}";
+                        RefreshDbStats();
 
-                // 파일 삭제 발생 시 DB 파편화 정리
-                if (r.Deleted > 0)
-                    Task.Run(() => { try { _db.Vacuum(); } catch { } });
+                        // 빌드 완료 후 FileWatcher 재시작 (빌드 중에는 중지했었음)
+                        _watcher.StartWatching(_settings.IndexRootPaths);
 
-                if (!string.IsNullOrWhiteSpace(txtSearch.Text)) _ = RunSearchAsync();
+                        // ── 2단계: 문서 유형 내용 학습 백그라운드 시작 ────────
+                        _isIndexing       = true;
+                        _isFirstRunStage2 = true;
+
+                        // Task.Run 으로 UI 스레드에서 완전히 분리
+                        // → 내용 인덱싱 중에도 UI/파일 검색 완전히 사용 가능
+                        var ct2 = _indexCts.Token;
+                        _ = Task.Run(async () =>
+                        {
+                            try   { await _indexer.BuildMissingContentAsync(ct2); }
+                            catch (OperationCanceledException) { /* 정상 종료 */ }
+                            catch (Exception ex)               { Debug.WriteLine($"[ContentIndex] {ex}"); }
+                        }, ct2);
+
+                        sslIndexStatus.Text = $"✅ 인덱싱 완료 ({r.TotalIndexed:N0}개)  —  📄 문서 내용 학습 중…";
+
+                        // ── 오버레이를 완료 상태로 전환 ──────────────────────
+                        ShowFirstRunOverlayCompleted(r.TotalIndexed, r.Elapsed);
+                        return;
+                    }
+
+                    // ── 첫 실행 2단계(문서 내용 학습) 완료 ──────────────────
+                    if (_isFirstRunStage2)
+                    {
+                        _isFirstRunStage2 = false;
+
+                        // 내용 검색 활성화 + 설정 저장
+                        _settings.EnableContentSearch   = true;
+                        _settings.EnableContentIndexing = true;
+                        _settings.Save();
+
+                        // 내용 검색 UI 활성화 (Visible 은 이미 true)
+                        chkContent.Checked         = true;
+                        tsmiSearchContent.Checked  = true;
+                        chkContent.Enabled         = true;
+                        tsmiSearchContent.Enabled  = true;
+
+                        sslIndexStatus.Text = r.Added > 0
+                            ? $"📄 내용 학습 완료 ({r.Added:N0}개 문서)  —  내용 검색이 활성화되었습니다"
+                            : "📄 내용 학습 완료  —  내용 검색이 활성화되었습니다";
+                        RefreshDbStats();
+                        return;
+                    }
+
+                    HideFirstRunOverlay();
+
+                    bool hasRealChanges = r.Added + r.Updated + r.Deleted > 0;
+
+                    if (hasRealChanges)
+                    {
+                        sslIndexStatus.Text = $"완료 {r.TotalIndexed:N0}개  +{r.Added} ~{r.Updated} -{r.Deleted}  {r.Elapsed.TotalSeconds:F1}s";
+
+                        var now = DateTime.Now;
+                        _settings.LastIndexedAt = now;
+                        _settings.Save();
+                        sslLastIndexed.Text = $"인덱싱: {now:yyyy-MM-dd HH:mm}";
+
+                        RefreshDbStats();
+
+                        if (r.Deleted > 0)
+                            Task.Run(() => { try { _db.Vacuum(); } catch { } });
+
+                        // 재검색: 마지막 자동 재검색으로부터 15초 이상 지난 경우만 실행
+                        // (FileWatcher/자동 인덱스가 짧은 간격으로 완료되어도 반복 노출 방지)
+                        if (!string.IsNullOrWhiteSpace(txtSearch.Text) &&
+                            (DateTime.Now - _lastAutoReSearch).TotalSeconds >= 15)
+                        {
+                            _lastAutoReSearch = DateTime.Now;
+                            _ = RunSearchAsync();
+                        }
+                    }
+                    else
+                    {
+                        sslIndexStatus.Text = string.Empty;
+                    }
+                });
             }
-            else
-            {
-                // 변경 없음 → 상태바만 조용히 비움, LastIndexedAt·설정 파일 갱신 없음
-                sslIndexStatus.Text = string.Empty;
-            }
-        });
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
+        };
+
         _indexer.IndexErrorOccurred += err => Debug.WriteLine($"[IndexError] {err.FilePath}: {err.Message}");
     }
 
@@ -520,6 +743,12 @@ public partial class MainForm : Form
         btnSearch.FlatAppearance.BorderColor = cAccent;
         btnSearch.FlatAppearance.BorderSize  = 0;
 
+        btnSearchHint.BackColor                         = cSurface;
+        btnSearchHint.ForeColor                         = Color.FromArgb(100, 160, 240);
+        btnSearchHint.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 100, 160, 240);
+        btnSearchHint.FlatAppearance.MouseDownBackColor = Color.FromArgb(55, 100, 160, 240);
+        _hintPopup?.SetDark(true);
+
         chkContent.ForeColor = cText; lblFilter.ForeColor = cSub;
         chkTypeDoc.ForeColor = chkTypePdf.ForeColor =
             chkTypeImage.ForeColor = chkTypeCode.ForeColor = cText;
@@ -540,15 +769,15 @@ public partial class MainForm : Form
 
         statusStrip.BackColor = Color.FromArgb(24, 24, 36); statusStrip.ForeColor = cSub;
         foreach (ToolStripItem item in statusStrip.Items) item.ForeColor = cSub;
-        _sslPrevPage.ForeColor = _sslNextPage.ForeColor = cSub;
 
         _recentBox.BackColor = cSurf2; _recentBox.ForeColor = cText;
 
         // 오버레이
         pnlOverlay.BackColor         = Color.FromArgb(18, 22, 38);
         lblOverlayTitle.ForeColor    = Color.FromArgb(30, 35, 50);
-        lblOverlayDesc.ForeColor     = Color.FromArgb(100, 116, 139);
-        lblOverlayProgress.ForeColor = Color.FromArgb(120, 130, 150);
+        lblOverlayDesc.ForeColor     = Color.FromArgb(80, 100, 130);
+        lblOverlayProgress.ForeColor = Color.FromArgb(110, 125, 148);
+        lblOverlayNote.ForeColor     = Color.FromArgb(140, 160, 190);
     }
 
     private void ApplyLightTheme()
@@ -585,6 +814,12 @@ public partial class MainForm : Form
         btnSearch.FlatAppearance.BorderColor = cAccent;
         btnSearch.FlatAppearance.BorderSize  = 0;
 
+        btnSearchHint.BackColor                         = cSurface;
+        btnSearchHint.ForeColor                         = cAccent;
+        btnSearchHint.FlatAppearance.MouseOverBackColor = cSurf2;
+        btnSearchHint.FlatAppearance.MouseDownBackColor = Color.FromArgb(220, 235, 255);
+        _hintPopup?.SetDark(false);
+
         chkContent.ForeColor = cText; lblFilter.ForeColor = cSub;
         chkTypeDoc.ForeColor = chkTypePdf.ForeColor =
             chkTypeImage.ForeColor = chkTypeCode.ForeColor = cText;
@@ -607,15 +842,50 @@ public partial class MainForm : Form
         // 상태 바 — 흰색 바닥
         statusStrip.BackColor = cSurface; statusStrip.ForeColor = cSub;
         foreach (ToolStripItem item in statusStrip.Items) item.ForeColor = cSub;
-        _sslPrevPage.ForeColor = _sslNextPage.ForeColor = cSub;
 
         _recentBox.BackColor = cSurface; _recentBox.ForeColor = cText;
 
         // 오버레이
         pnlOverlay.BackColor         = Color.FromArgb(30, 35, 50);
         lblOverlayTitle.ForeColor    = Color.FromArgb(26, 32, 44);
-        lblOverlayDesc.ForeColor     = Color.FromArgb(100, 116, 139);
-        lblOverlayProgress.ForeColor = Color.FromArgb(120, 130, 150);
+        lblOverlayDesc.ForeColor     = Color.FromArgb(80, 100, 130);
+        lblOverlayProgress.ForeColor = Color.FromArgb(110, 125, 148);
+        lblOverlayNote.ForeColor     = Color.FromArgb(140, 160, 190);
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // ListView 셀 툴팁 (이름·경로 열 전체 내용 표시)
+    // ─────────────────────────────────────────────────────────
+    private void OnListMouseMove(object? sender, MouseEventArgs e)
+    {
+        var hit = listResults.HitTest(e.X, e.Y);
+        if (hit.Item == null) { _cellTip.SetToolTip(listResults, null); _cellTipLastRow = -1; _cellTipLastCol = -1; return; }
+
+        int rowIdx = hit.Item.Index;
+        if (rowIdx >= _results.Count) return;
+
+        // 마우스 X 위치로 어느 컬럼인지 계산
+        int colIdx = 0, cumX = 0;
+        foreach (ColumnHeader col in listResults.Columns)
+        {
+            if (e.X < cumX + col.Width) { colIdx = col.Index; break; }
+            cumX += col.Width;
+        }
+
+        // 동일 셀이면 재설정 불필요
+        if (rowIdx == _cellTipLastRow && colIdx == _cellTipLastCol) return;
+        _cellTipLastRow = rowIdx;
+        _cellTipLastCol = colIdx;
+
+        var r = _results[rowIdx];
+        string tipText = colIdx switch
+        {
+            0 => r.FileName,                                          // 이름 열: 파일명
+            1 => r.FilePath,                                          // 경로 열: 전체 경로
+            _ => string.Empty
+        };
+
+        _cellTip.SetToolTip(listResults, tipText);
     }
 
     // ─────────────────────────────────────────────────────────
@@ -681,8 +951,9 @@ public partial class MainForm : Form
     private void UpdateSnippetPanel(SearchResult? r)
     {
         // 이전 비동기 로딩 취소
+        // ※ Dispose() 금지: 실행 중인 Task 가 같은 CTS 를 참조 중이므로
+        //   Cancel() 만 호출하고 GC 에 회수를 맡긴다.
         _snippetCts?.Cancel();
-        _snippetCts?.Dispose();
         _snippetCts = null;
 
         if (r is null)
@@ -716,37 +987,46 @@ public partial class MainForm : Form
                 // 파일 전체 내용 파싱 (최대 1 MB 기준, 초과 시 500 KB 제한)
                 var content = await _parser.ParseFileContent(filePath, maxSizeMB: 1);
 
-                if (cts.IsCancellationRequested) return;
+                if (cts.IsCancellationRequested || IsDisposed || !IsHandleCreated) return;
 
                 // 미리보기 최대 100,000자 표시
                 const int PreviewLimit = 100_000;
                 bool truncated = content.Length > PreviewLimit;
                 if (truncated) content = content[..PreviewLimit];
 
-                Invoke(() =>
+                try
                 {
-                    if (cts.IsCancellationRequested) return;
-                    rtbSnippet.Clear();
+                    Invoke(() =>
+                    {
+                        if (cts.IsCancellationRequested) return;
+                        rtbSnippet.Clear();
 
-                    if (string.IsNullOrEmpty(content))
-                    {
-                        rtbSnippet.ForeColor = clrSub;
-                        rtbSnippet.Text = "(미리보기를 지원하지 않는 파일 형식입니다)";
-                    }
-                    else
-                    {
-                        rtbSnippet.ForeColor = clrText;
-                        rtbSnippet.Text = content + (truncated ? "\n\n[…이하 내용 생략…]" : string.Empty);
-                        if (!string.IsNullOrEmpty(highlightWord))
-                            HighlightKeywordInSnippet(highlightWord);
-                    }
-                });
+                        if (string.IsNullOrEmpty(content))
+                        {
+                            rtbSnippet.ForeColor = clrSub;
+                            rtbSnippet.Text = "(미리보기를 지원하지 않는 파일 형식입니다)";
+                        }
+                        else
+                        {
+                            rtbSnippet.ForeColor = clrText;
+                            rtbSnippet.Text = content + (truncated ? "\n\n[…이하 내용 생략…]" : string.Empty);
+                            if (!string.IsNullOrEmpty(highlightWord))
+                                HighlightKeywordInSnippet(highlightWord);
+                        }
+                    });
+                }
+                catch (ObjectDisposedException) { }
+                catch (InvalidOperationException) { }
             }
             catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
             catch
             {
-                if (!cts.IsCancellationRequested)
-                    Invoke(() => { rtbSnippet.ForeColor = clrSub; rtbSnippet.Text = "(파일을 읽을 수 없습니다)"; });
+                if (!cts.IsCancellationRequested && !IsDisposed && IsHandleCreated)
+                {
+                    try { Invoke(() => { rtbSnippet.ForeColor = clrSub; rtbSnippet.Text = "(파일을 읽을 수 없습니다)"; }); }
+                    catch { }
+                }
             }
         }, cts.Token);
     }
@@ -788,42 +1068,48 @@ public partial class MainForm : Form
         var keyword = txtSearch.Text.Trim();
         if (keyword.Length < 2)
         {
-            _results = []; _currentPage = 0; _lastKeyword = string.Empty;
+            _results = []; _searchPage = 0; _totalCount = -1; _lastKeyword = string.Empty;
             listResults.VirtualListSize = 0; sslResultCount.Text = "준비";
-            _sslPrevPage.Enabled = _sslNextPage.Enabled = false;
             ResetSortHeaders(); UpdateSnippetPanel(null);
             Text = "SFM — Smart File Manager"; return;
         }
-        if (keyword != _lastKeyword) { _currentPage = 0; _lastKeyword = keyword; ResetSortHeaders(); }
+        if (keyword != _lastKeyword)
+        {
+            _searchPage = 0; _totalCount = -1; _lastKeyword = keyword;
+            ResetSortHeaders();
+        }
 
         var query = new SearchQuery
         {
             Keyword         = keyword,
             MaxResults      = _settings.MaxSearchResults,
-            SearchInContent = chkContent.Checked,
+            SearchInContent = _settings.EnableContentSearch && chkContent.Checked,
             Extensions      = GetSelectedExtensions(),
-            Page            = _currentPage,
+            Page            = 0,   // 항상 처음부터
         };
-        sslResultCount.Text = "검색 중…"; _sslPrevPage.Enabled = _sslNextPage.Enabled = false;
+        sslResultCount.Text = "검색 중…";
 
         try
         {
-            var sw      = Stopwatch.StartNew();
-            var results = await _searcher.SearchAsync(query);
+            var sw = Stopwatch.StartNew();
+
+            // 검색 결과(첫 페이지) + 전체 건수를 병렬로 조회
+            var searchTask = _searcher.SearchAsync(query);
+            var countTask  = _searcher.CountAsync(query);
+            await Task.WhenAll(searchTask, countTask);
             sw.Stop();
+
             if (txtSearch.Text.Trim() != keyword) return;
 
-            _results = results; _sortColumn = -1;
+            _results    = searchTask.Result;
+            _totalCount = countTask.Result;
+            _searchPage = 0;
+            _sortColumn = -1;
+
             listResults.VirtualListSize = _results.Count;
             listResults.Invalidate();
 
-            _sslPrevPage.Enabled = _currentPage > 0;
-            _sslNextPage.Enabled = _results.Count >= _settings.MaxSearchResults;
-
-            var elapsed = sw.Elapsed.TotalSeconds;
-            sslResultCount.Text = _results.Count == 0
-                ? $"검색 완료.  결과 없음.  경과 시간: {elapsed:F3} 초"
-                : $"검색 완료.  {_results.Count:N0} 파일/폴더 발견.  경과 시간: {elapsed:F3} 초";
+            UpdateStatusCountText(sw.Elapsed.TotalSeconds);
 
             if (_results.Count > 0)
             {
@@ -833,7 +1119,6 @@ public partial class MainForm : Form
         }
         catch (Microsoft.Data.Sqlite.SqliteException sqEx) when (sqEx.SqliteErrorCode == 11)
         {
-            // 오류코드 11 = SQLITE_CORRUPT — 손상 DB 자동 복구
             sslResultCount.Text = "DB 손상 감지 — 자동 복구 중…";
             try
             {
@@ -851,6 +1136,75 @@ public partial class MainForm : Form
             sslResultCount.Text = $"검색 오류: {ex.Message}";
             Debug.WriteLine($"[RunSearchAsync] {ex}");
         }
+    }
+
+    /// <summary>
+    /// 스크롤 하단 도달 시 다음 500개를 추가로 로드하여 _results 에 누적한다.
+    /// </summary>
+    private async Task LoadMoreResultsAsync()
+    {
+        if (_isLoadingMore) return;
+        var keyword = _lastKeyword;
+        if (string.IsNullOrEmpty(keyword)) return;
+
+        // 이미 전체 로드 완료된 경우
+        if (_totalCount >= 0 && _results.Count >= _totalCount) return;
+
+        _isLoadingMore = true;
+        _searchPage++;
+
+        var query = new SearchQuery
+        {
+            Keyword         = keyword,
+            MaxResults      = _settings.MaxSearchResults,
+            SearchInContent = _settings.EnableContentSearch && chkContent.Checked,
+            Extensions      = GetSelectedExtensions(),
+            Page            = _searchPage,
+        };
+
+        sslResultCount.Text = $"추가 로딩 중…  ({_results.Count:N0}개 표시)";
+
+        try
+        {
+            var more = await _searcher.SearchAsync(query);
+            if (txtSearch.Text.Trim() != keyword) return;
+            if (more.Count == 0) { UpdateStatusCountText(); return; }
+
+            _results.AddRange(more);
+            listResults.VirtualListSize = _results.Count;
+            listResults.Invalidate();
+            UpdateStatusCountText();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[LoadMoreResultsAsync] {ex}");
+            _searchPage--;   // 실패 시 페이지 롤백
+        }
+        finally
+        {
+            _isLoadingMore = false;
+        }
+    }
+
+    /// <summary>상태 표시줄 결과 건수 텍스트를 현재 _results / _totalCount 기준으로 갱신한다.</summary>
+    private void UpdateStatusCountText(double? elapsedSec = null)
+    {
+        var timeStr = elapsedSec.HasValue ? $"  ({elapsedSec.Value:F3}초)" : string.Empty;
+
+        if (_results.Count == 0)
+        {
+            sslResultCount.Text = $"결과 없음{timeStr}";
+            return;
+        }
+
+        bool hasMore = _totalCount > 0 && _results.Count < _totalCount;
+
+        if (hasMore)
+            sslResultCount.Text = $"표시: {_results.Count:N0} / 전체: {_totalCount:N0}개{timeStr}   ↓ 스크롤하면 더 보기";
+        else if (_totalCount > 0)
+            sslResultCount.Text = $"전체: {_totalCount:N0}개{timeStr}";
+        else
+            sslResultCount.Text = $"{_results.Count:N0}개{timeStr}";
     }
 
     private void ResetSortHeaders()
@@ -928,10 +1282,9 @@ public partial class MainForm : Form
                 {
                     // 2차 ESC: 결과 전체 초기화
                     _debounceTimer.Stop();
-                    _results = []; _currentPage = 0; _lastKeyword = string.Empty;
+                    _results = []; _searchPage = 0; _totalCount = -1; _lastKeyword = string.Empty;
                     listResults.VirtualListSize = 0;
                     sslResultCount.Text = "준비";
-                    _sslPrevPage.Enabled = _sslNextPage.Enabled = false;
                     ResetSortHeaders();
                     UpdateSnippetPanel(null);
                     Text = "SFM — Smart File Manager";
@@ -948,11 +1301,8 @@ public partial class MainForm : Form
                 SelectAll(); return true;
             case Keys.Control | Keys.C when listResults.Focused:
                 CopySelectedPaths(); return true;
-            case Keys.Alt | Keys.Left when _sslPrevPage.Enabled:
-                _currentPage--; _ = RunSearchAsync(); return true;
-            case Keys.Alt | Keys.Right when _sslNextPage.Enabled:
-                _currentPage++; _ = RunSearchAsync(); return true;
             case Keys.F4:
+                if (!chkContent.Enabled) return true;   // 내용 학습 완료 전 — 단축키 무시
                 chkContent.Checked = !chkContent.Checked;
                 tsmiSearchContent.Checked = chkContent.Checked; return true;
         }
@@ -1097,7 +1447,15 @@ public partial class MainForm : Form
     {
         if (MessageBox.Show("전체 재인덱싱을 시작하시겠습니까?", "SFM", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
         sslIndexStatus.Text = "재인덱싱 준비 중…";
-        _ = _indexer.BuildIndexAsync(_settings.IndexRootPaths);
+        _isIndexing = true;
+        var rootPaths = _settings.IndexRootPaths;
+        var ct        = _indexCts.Token;
+        _ = Task.Run(async () =>
+        {
+            try   { await _indexer.BuildIndexAsync(rootPaths, ct); }
+            catch (OperationCanceledException) { /* 정상 종료 */ }
+            catch (Exception ex)               { Debug.WriteLine($"[Reindex] {ex}"); }
+        }, ct);
     }
     private void OnVacuumClick(object? sender, EventArgs e)
     {
@@ -1107,6 +1465,50 @@ public partial class MainForm : Form
             try { _db.Vacuum(); Invoke(() => { sslIndexStatus.Text = "DB 최적화 완료"; RefreshDbStats(); }); }
             catch (Exception ex) { Invoke(() => sslIndexStatus.Text = $"최적화 실패: {ex.Message}"); }
         });
+    }
+
+    private void OnResetIndexClick(object? sender, EventArgs e)
+    {
+        var msg = "인덱스를 완전히 초기화하고 처음부터 다시 학습합니다.\n\n"
+                + "기존 인덱스 데이터가 모두 삭제되며,\n"
+                + "전체 파일 학습이 다시 진행됩니다.\n\n"
+                + "계속하시겠습니까?";
+        if (MessageBox.Show(msg, "인덱스 초기화", MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            return;
+
+        // ① 진행 중인 인덱싱 취소 플래그 (새 BuildIndexAsync 호출 전 정리)
+        _isFirstRunStage1 = false;
+        _isFirstRunStage2 = false;
+        _isIndexing       = false;
+
+        // ② DB 데이터 전체 삭제
+        try
+        {
+            _db.ClearAllIndexes();
+            _db.Vacuum();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"인덱스 삭제 중 오류가 발생했습니다.\n{ex.Message}",
+                "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        // ③ 설정 초기화: LastIndexedAt = null → 첫 실행으로 인식
+        _settings.LastIndexedAt         = null;
+        _settings.EnableContentIndexing = false;
+        _settings.Save();
+
+        // ④ 검색 결과 초기화
+        _results = []; _searchPage = 0; _totalCount = -1; _lastKeyword = string.Empty;
+        listResults.VirtualListSize = 0;
+        sslResultCount.Text = "준비";
+        sslLastIndexed.Text = string.Empty;
+        RefreshDbStats();
+
+        // ⑤ 첫 실행 인덱싱 재시작
+        StartFirstRunIndex();
     }
 
     // ─────────────────────────────────────────────────────────
@@ -1123,28 +1525,90 @@ public partial class MainForm : Form
         catch { }
     }
 
+    // ─────────────────────────────────────────────────────────
+    // 검색 힌트 팝업 (? 버튼)
+    // ─────────────────────────────────────────────────────────
+    private void OnSearchHintMouseEnter(object? sender, EventArgs e)
+    {
+        _hintHideTimer?.Stop();
+        EnsureHintPopup();
+        _hintPopup!.SetDark(_settings.IsDarkMode);
+        _hintPopup.ShowBelow(btnSearchHint);
+    }
+
+    private void OnSearchHintMouseLeave(object? sender, EventArgs e)
+    {
+        EnsureHintHideTimer();
+        _hintHideTimer!.Start();
+    }
+
+    private void EnsureHintPopup()
+    {
+        if (_hintPopup != null && !_hintPopup.IsDisposed) return;
+        _hintPopup = new SearchHintPopup();
+        _hintPopup.Owner = this;   // 항상 메인 창 위에 표시
+        _hintPopup.MouseEnter += (_, _) => _hintHideTimer?.Stop();
+        _hintPopup.MouseLeave += (_, _) => _hintPopup?.Hide();
+    }
+
+    private void EnsureHintHideTimer()
+    {
+        if (_hintHideTimer != null) return;
+        _hintHideTimer = new System.Windows.Forms.Timer { Interval = 250 };
+        _hintHideTimer.Tick += (_, _) =>
+        {
+            _hintHideTimer.Stop();
+            _hintPopup?.Hide();
+        };
+    }
+
+    /// <summary>
+    /// 고정 3열(크기·날짜·유형)을 헤더 + 실제 콘텐츠 기준으로 자동 측정 후,
+    /// 남은 공간을 이름 40% / 경로 60% 로 분배한다.
+    /// 결과가 없을 때는 헤더 텍스트 기준으로 초기화한다.
+    /// </summary>
     private void AutoResizeColumns()
     {
-        if (_results.Count == 0) return;
+        if (listResults.ClientSize.Width <= 0) return;
 
-        // ① 내용 기준 1차 조정 (VirtualMode에서도 동작)
-        listResults.AutoResizeColumns(ColumnHeaderAutoResizeStyle.ColumnContent);
+        var font = listResults.Font;
 
-        // ② 각 열마다 헤더 너비도 측정 → 내용·헤더 중 큰 값 적용
-        foreach (ColumnHeader col in listResults.Columns)
+        // ── 1. 고정 열: 헤더 텍스트로 초기 측정 ──────────────────
+        int sizeW     = MeasureColW(font, colSize.Text);
+        int modifiedW = MeasureColW(font, colModified.Text);
+        int matchW    = MeasureColW(font, colMatch.Text);
+
+        // ── 2. 고정 열: 샘플 콘텐츠 너비와 비교해 더 넓은 값 선택 ──
+        if (_results.Count > 0)
         {
-            int contentWidth = col.Width;
-            listResults.AutoResizeColumn(col.Index, ColumnHeaderAutoResizeStyle.HeaderSize);
-            col.Width = Math.Max(contentWidth, col.Width);
+            int sample = Math.Min(_results.Count, 200);
+            for (int i = 0; i < sample; i++)
+            {
+                var r = _results[i];
+                sizeW     = Math.Max(sizeW,     MeasureColW(font, FormatSize(r.FileSize)));
+                modifiedW = Math.Max(modifiedW, MeasureColW(font,
+                    r.ModifiedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")));
+                matchW    = Math.Max(matchW,    MeasureColW(font, FormatFileType(r.Extension)));
+            }
         }
 
-        // ③ 절대 최솟값 보장
-        if (colFileName.Width < 180) colFileName.Width = 180;
-        if (colPath.Width     < 200) colPath.Width     = 200;
-        if (colSize.Width     < 105) colSize.Width     = 105;
-        if (colModified.Width < 130) colModified.Width = 130;
-        if (colMatch.Width    <  70) colMatch.Width    =  70;
+        colSize.Width     = sizeW;
+        colModified.Width = modifiedW;
+        colMatch.Width    = matchW;
+
+        // ── 3. 가변 열: 남은 공간을 이름 40% / 경로 60% ───────────
+        int scrollbarW = SystemInformation.VerticalScrollBarWidth + 2;
+        int fixedTotal = sizeW + modifiedW + matchW;
+        int available  = listResults.ClientSize.Width - scrollbarW - fixedTotal;
+        if (available < 240) available = 240;
+
+        colFileName.Width = Math.Max(80,  (int)(available * 0.40));
+        colPath.Width     = Math.Max(140, available - colFileName.Width);
     }
+
+    /// <summary>TextRenderer 기준 텍스트 실측 너비 + 셀 패딩.</summary>
+    private static int MeasureColW(Font font, string text, int padding = 14)
+        => TextRenderer.MeasureText(text, font).Width + padding;
 
     // ─────────────────────────────────────────────────────────
     // 첫 실행 오버레이
@@ -1152,34 +1616,109 @@ public partial class MainForm : Form
 
     private void StartFirstRunIndex()
     {
-        // IndexRootPaths 가 비어 있으면 로컬 고정 드라이브 전체를 기본값으로 설정
+        // ① 루트 경로 미설정 시 로컬 고정 드라이브 전체를 기본값으로 설정
         if (_settings.IndexRootPaths.Length == 0)
         {
             _settings.IndexRootPaths = DriveInfo.GetDrives()
                 .Where(d => d.DriveType == DriveType.Fixed && d.IsReady)
                 .Select(d => d.RootDirectory.FullName)
                 .ToArray();
-            _settings.Save();
-            _watcher.StopWatching();
-            _watcher.StartWatching(_settings.IndexRootPaths);
         }
 
+        // 파일명+메타 인덱싱 (내용 인덱싱 비활성화)
+        _settings.EnableContentIndexing = false;
+        _settings.Save();
+
+        _firstRunCompleted = false;   // 새 빌드 시작 → 완료 차단 플래그 초기화
+
+        // BuildIndexAsync 실행 중에는 FileWatcher 완전 중지.
+        // IndexSingleFileAsync 도 IndexCompleted 를 발생시키므로,
+        // 빌드 중 파일 변경이 감지되면 _isFirstRunStage1 을 소비해버리는 버그를 방지한다.
+        // 빌드 완료 후 IndexCompleted 핸들러 내에서 감시를 재시작한다.
+        _watcher.StopWatching();
+
         ShowFirstRunOverlay();
-        _isIndexing = true;
-        _ = _indexer.BuildIndexAsync(_settings.IndexRootPaths);
+        _isIndexing       = true;
+        _isFirstRunStage1 = true;   // 플래그: IndexCompleted 에서 완료 처리
+
+        // Task.Run 으로 UI 스레드에서 완전히 분리 → UI 응답 유지
+        var rootPaths1 = _settings.IndexRootPaths;
+        var ct1        = _indexCts.Token;
+        _ = Task.Run(async () =>
+        {
+            try   { await _indexer.BuildIndexAsync(rootPaths1, ct1); }
+            catch (OperationCanceledException) { /* 정상 종료 */ }
+            catch (Exception ex)               { Debug.WriteLine($"[BuildIndex] {ex}"); }
+        }, ct1);
     }
 
     private void ShowFirstRunOverlay()
     {
+        // 진행 바 초기화: Marquee 로 시작 (파일 수 파악 전)
+        pbOverlay.Style = ProgressBarStyle.Marquee;
+        pbOverlay.Value = 0;
+        lblOverlayDesc.Text     = "파일 목록을 수집하고 있습니다...";
+        lblOverlayProgress.Text = "잠시 기다려 주세요...";
+
         pnlOverlay.SetBounds(0, 0, ClientSize.Width, ClientSize.Height);
         CenterOverlayCard();
         pnlOverlay.BringToFront();
         pnlOverlay.Visible = true;
+        pnlOverlay.Refresh();       // 즉시 그리기 강제 — Visible=true 직후 렌더링 보장
+        Application.DoEvents();     // Marquee 애니메이션 첫 프레임 처리
     }
 
     private void HideFirstRunOverlay()
     {
-        if (pnlOverlay.Visible) pnlOverlay.Visible = false;
+        if (!pnlOverlay.Visible) return;
+        // _firstRunCompleted == true 인 동안은 어떤 자동 호출도 오버레이를 닫지 않는다.
+        // 오직 사용자가 [닫기] 버튼을 클릭해야만 닫힌다.
+        if (_firstRunCompleted) return;
+        pnlOverlay.Visible = false;
+    }
+
+    /// <summary>
+    /// 인덱싱 완료 후 오버레이를 '완료 상태'로 전환한다.
+    /// 진행 바→100%, 완료 문구 표시, 닫기 버튼 노출.
+    /// 오버레이는 사용자가 [검색 시작 →] 버튼을 누를 때까지 유지된다.
+    /// </summary>
+    private void ShowFirstRunOverlayCompleted(int totalIndexed, TimeSpan elapsed)
+    {
+        if (!pnlOverlay.Visible) return;    // 이미 닫힌 경우 무시
+
+        // ── 아이콘·제목 ─────────────────────────────────────────
+        lblOverlayIcon.Text       = "✅";
+        lblOverlayIcon.Font       = new Font("Segoe UI Emoji", 30F);
+
+        lblOverlayTitle.Text      = "학습이 완료되었습니다!";
+        lblOverlayTitle.ForeColor = Color.FromArgb(21, 128, 61);   // 초록
+
+        // ── 설명 ─────────────────────────────────────────────────
+        lblOverlayDesc.Text       = $"{totalIndexed:N0}개 파일 인덱싱 완료";
+        lblOverlayDesc.Font       = new Font("Segoe UI", 10F, FontStyle.Bold);
+        lblOverlayDesc.ForeColor  = Color.FromArgb(30, 80, 160);
+
+        // ── 진행 바 → 100% (초록) ─────────────────────────────────
+        pbOverlay.Style           = ProgressBarStyle.Continuous;
+        pbOverlay.Value           = 100;
+
+        // ── 소요 시간 ─────────────────────────────────────────────
+        var elapsedStr = elapsed.TotalMinutes >= 1
+            ? $"{(int)elapsed.TotalMinutes}분 {elapsed.Seconds}초"
+            : $"{elapsed.TotalSeconds:F1}초";
+        lblOverlayProgress.Text   = $"소요 시간: {elapsedStr}  ·  이제 파일명 검색을 시작할 수 있습니다";
+        lblOverlayProgress.ForeColor = Color.FromArgb(60, 120, 60);
+
+        // ── 안내 메모 ─────────────────────────────────────────────
+        lblOverlayNote.Text       = "검색창에 파일명을 입력하여 검색을 시작하세요.\r\n    📄 문서 내용 학습이 백그라운드에서 진행 중입니다.  완료 시 내용 검색이 활성화됩니다.";
+        lblOverlayNote.ForeColor  = Color.FromArgb(100, 120, 150);
+
+        // ── 닫기 버튼 표시 및 포커스 ─────────────────────────────
+        _firstRunCompleted        = true;   // 이 시점부터 자동 닫기 차단
+        btnOverlayClose.Visible   = true;
+        btnOverlayClose.Focus();
+
+        pnlOverlayCard.Invalidate();    // 카드 테두리 재렌더링
     }
 
     private void CenterOverlayCard()
@@ -1252,10 +1791,27 @@ public partial class MainForm : Form
         _autoIndexCycle++;
         sslIndexStatus.Text = $"자동 인덱싱 중… ({DateTime.Now:HH:mm})";
 
+        var ct = _indexCts.Token;   // 종료 시 CancellationTokenSource 에 직접 접근하지 않도록 미리 캡처
         _ = Task.Run(async () =>
         {
-            try   { await _indexer.UpdateIndexAsync(); }
-            catch { Invoke(() => { _isIndexing = false; sslIndexStatus.Text = string.Empty; }); }
+            try
+            {
+                await _indexer.UpdateIndexAsync(ct);
+            }
+            catch (OperationCanceledException) { /* 폼 종료 시 정상 취소 — 무시 */ }
+            catch
+            {
+                // 폼이 살아있을 때만 UI 업데이트
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    try { Invoke(() => { _isIndexing = false; sslIndexStatus.Text = string.Empty; }); }
+                    catch { _isIndexing = false; }
+                }
+                else
+                {
+                    _isIndexing = false;
+                }
+            }
         });
     }
 
@@ -1292,10 +1848,29 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
-        _debounceTimer.Stop(); _debounceTimer.Dispose();
-        _autoIndexTimer?.Stop(); _autoIndexTimer?.Dispose();
-        _snippetCts?.Cancel(); _snippetCts?.Dispose();
-        _watcher.Dispose(); _db.Dispose();
+        // ThreadException 핸들러가 MessageBox 를 닫으면 WM_CLOSE 가 재전송될 수 있어
+        // OnFormClosed 가 두 번 이상 호출되는 경우를 방지한다.
+        if (_isClosing) { base.OnFormClosed(e); return; }
+        _isClosing = true;
+
+        // ① 인덱서 백그라운드 작업 먼저 취소 (DB Dispose 전에 실행 중인 Task 정지)
+        // 이미 Dispose 된 경우를 대비해 try-catch 로 보호
+        try { _indexCts.Cancel(); } catch (ObjectDisposedException) { }
+
+        try { _debounceTimer.Stop(); _debounceTimer.Dispose(); } catch { }
+        try { _autoIndexTimer?.Stop(); _autoIndexTimer?.Dispose(); } catch { }
+        try { _hintHideTimer?.Stop(); _hintHideTimer?.Dispose(); _hintHideTimer = null; } catch { }
+        try { _hintPopup?.Close(); _hintPopup?.Dispose(); _hintPopup = null; } catch { }
+        // _snippetCts 는 Dispose 없이 Cancel 만 — 실행 중인 Task 가 token 을 참조 중일 수 있음
+        _snippetCts?.Cancel();
+        _snippetCts = null;
+
+        // ② 파일 감시 중지 → 그 다음 DB 정리
+        try { _watcher.Dispose(); } catch { }
+        try { _indexCts.Dispose(); } catch (ObjectDisposedException) { }
+        try { _db.Dispose(); } catch { }
+
+        // ③ 창 위치·크기 저장
         _settings.WindowMaximized = (WindowState == FormWindowState.Maximized);
         if (WindowState == FormWindowState.Normal)
         { _settings.WindowX = Location.X; _settings.WindowY = Location.Y; _settings.WindowWidth = Size.Width; _settings.WindowHeight = Size.Height; }

@@ -41,11 +41,61 @@ public sealed class Searcher
                 ? await SearchWithChoSeongAsync(keyword, query)
                 : await SearchRegularAsync(keyword, query);
 
-        // 검색 히스토리 저장 (fire-and-forget)
-        try { _db.SaveSearchHistory(keyword, query.SearchInContent && !hasChoSeong && !isWildcard); }
-        catch { /* 히스토리 저장 실패가 검색 결과에 영향 X */ }
+        // 검색 히스토리 저장 (fire-and-forget, 락 보호)
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                _db.DbLock.Wait();
+                try { _db.SaveSearchHistory(keyword, query.SearchInContent && !hasChoSeong && !isWildcard); }
+                finally { _db.DbLock.Release(); }
+            }
+            catch { /* 히스토리 저장 실패가 검색 결과에 영향 X */ }
+        });
 
         return results;
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // 전체 건수 조회 (무한 스크롤용 total count)
+    // ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 검색 조건에 해당하는 전체 파일 수를 비동기로 반환한다.<br/>
+    /// 초성 검색(C# 후필터 방식)은 정확한 DB COUNT 가 불가능하므로 <c>-1</c>을 반환한다.
+    /// </summary>
+    public async Task<long> CountAsync(SearchQuery query)
+    {
+        if (string.IsNullOrWhiteSpace(query.Keyword)) return 0;
+
+        var keyword      = query.Keyword.Trim();
+        bool isWildcard  = HasWildcard(keyword);
+        bool hasChoSeong = !isWildcard && KoreanUtil.HasChoSeong(keyword);
+
+        // 초성 검색: C# 후필터라 DB 에서 정확한 count 산출 불가
+        if (hasChoSeong) return -1;
+
+        if (isWildcard)
+        {
+            var likePat = BuildWildcardLikePattern(keyword);
+            return await Task.Run(() =>
+            {
+                _db.DbLock.Wait();
+                try { return _db.CountSearchFiltered(likePat, null, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore); }
+                finally { _db.DbLock.Release(); }
+            });
+        }
+
+        // 일반 검색: 이름이 keyword 로 시작하는 파일 (abc → abc%)
+        var nameLike = $"{EscapeLike(keyword)}%";
+        string? ftsQuery = query.SearchInContent ? KoreanUtil.EscapeFts(keyword) : null;
+
+        return await Task.Run(() =>
+        {
+            _db.DbLock.Wait();
+            try { return _db.CountSearchFiltered(nameLike, ftsQuery, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore); }
+            finally { _db.DbLock.Release(); }
+        });
     }
 
     // ─────────────────────────────────────────────────────────
@@ -62,15 +112,12 @@ public sealed class Searcher
         int dbOffset    = query.Page * query.MaxResults;
         var likePattern = BuildWildcardLikePattern(keyword);
 
-        var nameHits = await Task.Run(() => _db.SearchByNameFiltered(
-            likePattern : likePattern,
-            extensions  : query.Extensions,
-            minSize     : query.MinSize,
-            maxSize     : query.MaxSize,
-            after       : query.ModifiedAfter,
-            before      : query.ModifiedBefore,
-            limit       : query.MaxResults,
-            offset      : dbOffset));
+        var nameHits = await Task.Run(() =>
+        {
+            _db.DbLock.Wait();
+            try { return _db.SearchByNameFiltered(likePattern, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, query.MaxResults, dbOffset); }
+            finally { _db.DbLock.Release(); }
+        });
 
         return Sort(
             nameHits.Select(f => ToResult(f, string.Empty, matchedName: true, matchedContent: false)),
@@ -87,15 +134,13 @@ public sealed class Searcher
         // ── 1. 파일명 LIKE 검색 ───────────────────────────────
         int dbOffset = query.Page * query.MaxResults;
 
-        var nameHits = await Task.Run(() => _db.SearchByNameFiltered(
-            likePattern : $"%{EscapeLike(keyword)}%",
-            extensions  : query.Extensions,
-            minSize     : query.MinSize,
-            maxSize     : query.MaxSize,
-            after       : query.ModifiedAfter,
-            before      : query.ModifiedBefore,
-            limit       : query.MaxResults,
-            offset      : dbOffset));
+        // 이름이 keyword 로 시작하는 파일 (abc → abc%)
+        var nameHits = await Task.Run(() =>
+        {
+            _db.DbLock.Wait();
+            try { return _db.SearchByNameFiltered($"{EscapeLike(keyword)}%", query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, query.MaxResults, dbOffset); }
+            finally { _db.DbLock.Release(); }
+        });
 
         var map = new Dictionary<string, SearchResult>(StringComparer.OrdinalIgnoreCase);
         foreach (var f in nameHits)
@@ -105,15 +150,12 @@ public sealed class Searcher
         if (query.SearchInContent)
         {
             var ftsQuery    = KoreanUtil.EscapeFts(keyword);
-            var contentHits = await Task.Run(() => _db.SearchByContentFiltered(
-                ftsQuery   : ftsQuery,
-                extensions : query.Extensions,
-                minSize    : query.MinSize,
-                maxSize    : query.MaxSize,
-                after      : query.ModifiedAfter,
-                before     : query.ModifiedBefore,
-                limit      : query.MaxResults,
-                offset     : dbOffset));
+            var contentHits = await Task.Run(() =>
+            {
+                _db.DbLock.Wait();
+                try { return _db.SearchByContentFiltered(ftsQuery, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, query.MaxResults, dbOffset); }
+                finally { _db.DbLock.Release(); }
+            });
 
             foreach (var (file, rawSnippet) in contentHits)
             {
@@ -150,26 +192,23 @@ public sealed class Searcher
             // 순수 초성("ㅎㄱ"): LIKE 패턴이 너무 넓으므로 최신 파일 N개를 가져와 후필터
             var limit = Math.Min(query.MaxResults * ChoSeongCandidateMultiplier,
                                  ChoSeongCandidateMax);
-            candidates = await Task.Run(() => _db.GetRecentFiles(
-                extensions : query.Extensions,
-                minSize    : query.MinSize,
-                maxSize    : query.MaxSize,
-                after      : query.ModifiedAfter,
-                before     : query.ModifiedBefore,
-                limit      : limit));
+            candidates = await Task.Run(() =>
+            {
+                _db.DbLock.Wait();
+                try { return _db.GetRecentFiles(query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, limit); }
+                finally { _db.DbLock.Release(); }
+            });
         }
         else
         {
             // 혼합("한ㄱ", "ㅎ교"): 비초성 부분으로 LIKE 필터 후 C# 후필터
             var likePattern = KoreanUtil.ToLikePattern(keyword);
-            candidates = await Task.Run(() => _db.SearchByNameFiltered(
-                likePattern : likePattern,
-                extensions  : query.Extensions,
-                minSize     : query.MinSize,
-                maxSize     : query.MaxSize,
-                after       : query.ModifiedAfter,
-                before      : query.ModifiedBefore,
-                limit       : Math.Min(query.MaxResults * 5, 5_000)));
+            candidates = await Task.Run(() =>
+            {
+                _db.DbLock.Wait();
+                try { return _db.SearchByNameFiltered(likePattern, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, Math.Min(query.MaxResults * 5, 5_000)); }
+                finally { _db.DbLock.Release(); }
+            });
         }
 
         // C# 초성 패턴 매칭
@@ -247,7 +286,28 @@ public sealed class Searcher
                 default:   sb.Append(c);      break;
             }
         }
-        return sb.ToString();
+
+        var pattern = sb.ToString();
+
+        // 패턴이 와일드카드(%/_)로 끝나지 않을 때,
+        // 마지막 % 이후 세그먼트에 점(.)이 없으면 확장자를 커버하기 위해 % 를 자동 추가한다.
+        //
+        // 예)  *abc   → %abc   → 마지막 세그먼트 "abc" 에 점 없음 → %abc%
+        //       → 가나abc.txt  LIKE '%abc%'  → 매칭 ✓
+        //
+        // 예)  *.txt  → %.txt  → 마지막 세그먼트 ".txt" 에 점 있음 → 변경 없음
+        //       → 가나abc.txt  LIKE '%.txt'  → 매칭 ✓
+        //
+        // 예)  *abc.txt → %abc.txt → 점 있음 → 변경 없음
+        if (!pattern.EndsWith('%') && !pattern.EndsWith('_'))
+        {
+            var lastPct = pattern.LastIndexOf('%');
+            var suffix  = lastPct >= 0 ? pattern[(lastPct + 1)..] : pattern;
+            if (!suffix.Contains('.'))
+                pattern += '%';
+        }
+
+        return pattern;
     }
 
     /// <summary>미리보기 하이라이트용 — 와일드카드 문자(* ?)를 제거한 순수 키워드를 반환한다.</summary>

@@ -10,29 +10,28 @@
     <RootNamespace>SFM</RootNamespace>
 
     <!-- 어셈블리 메타데이터 -->
-    <Version>1.0.0</Version>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
     <Product>SFM - Smart File Manager</Product>
     <Company>SFM</Company>
-    <Copyright>Copyright © 2025</Copyright>
+    <Copyright>Copyright © 2026</Copyright>
     <Description>로컬 파일 전문 검색 도구 (파일명 + 내용 인덱싱, 한국어 초성 검색 지원)</Description>
 
     <!-- 애플리케이션 아이콘 (프로젝트 루트 sfm.ico) -->
     <ApplicationIcon>sfm.ico</ApplicationIcon>
 
-    <!-- 단일 EXE 설정 (.NET 8, win-x64 self-contained) -->
-    <PublishSingleFile>true</PublishSingleFile>
+    <!-- 배포 설정 (win-x64, self-contained 폴더 방식) -->
+    <!-- SingleFile 방식은 첫 실행 시 %TEMP% 압축 해제 지연(30초+) 발생 → 제거 -->
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <!-- IncludeAllContentForSelfExtract: 네이티브 DLL(pdfium 등)을 EXE 안에 포함 -->
-    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
 
-    <!-- TrimmerRootDescriptor 없이 Trim 사용 시 런타임 오류 발생 가능 → 비활성화 -->
+    <!-- WinForms는 Trim 미지원 → 비활성화 -->
     <PublishTrimmed>false</PublishTrimmed>
-    <!-- ReadyToRun: JIT 예열 최소화, 첫 실행 속도 개선 -->
-    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- ReadyToRun 제거: 크기 감소 (WinForms 앱은 JIT 체감 없음) -->
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <!-- PDB 심볼 배포 제외 -->
+    <DebugType>none</DebugType>
   </PropertyGroup>
 
   <ItemGroup>

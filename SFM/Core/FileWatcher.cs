@@ -66,7 +66,8 @@ public sealed class FileWatcher : IDisposable
 
             foreach (var cts in _debounce.Values)
             {
-                cts.Cancel();
+                // Cancel() 은 이미 Dispose 된 CTS 에서 ObjectDisposedException 을 발생시키므로 보호
+                try { cts.Cancel(); } catch (ObjectDisposedException) { }
                 cts.Dispose();
             }
             _debounce.Clear();
@@ -235,8 +236,13 @@ public sealed class FileWatcher : IDisposable
         }
 
         // 락 바깥에서 취소하여 잠금 경합 최소화
-        oldCts?.Cancel();
-        oldCts?.Dispose();
+        // ※ StopWatching() 과의 경쟁 조건: StopWatching 이 먼저 실행되어
+        //   oldCts 를 Dispose 했을 수 있으므로 Cancel() 은 try-catch 로 보호한다.
+        if (oldCts != null)
+        {
+            try { oldCts.Cancel(); } catch (ObjectDisposedException) { }
+            oldCts.Dispose();
+        }
 
         _ = RunAfterDelayAsync(key, action, newCts);
     }

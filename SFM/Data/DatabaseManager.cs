@@ -18,6 +18,13 @@ public class DatabaseManager : IDisposable
     private readonly string _dbPath;
     private SqliteConnection? _connection;
 
+    /// <summary>
+    /// DB 접근 직렬화용 세마포어 (1:1).
+    /// Indexer 쓰기 작업과 Searcher 읽기 작업이 같은 SqliteConnection 을 공유하므로
+    /// 동시 접근 시 내부 상태 오염을 방지하기 위해 모든 DB 호출 전후에 획득/해제한다.
+    /// </summary>
+    public readonly SemaphoreSlim DbLock = new(1, 1);
+
     private string ConnectionString => $"Data Source={_dbPath}";
 
     // ── 생성자 ───────────────────────────────────────────────
@@ -685,6 +692,100 @@ public class DatabaseManager : IDisposable
     }
 
     // ─────────────────────────────────────────────────────────
+    // 전체 검색 건수 (무한 스크롤용 total count)
+    // ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 파일명 검색(선택적으로 내용 검색 포함) 조건에 해당하는 고유 파일 수를 반환한다.
+    /// 파일명 + 내용을 UNION 으로 결합하여 중복 없는 정확한 건수를 계산한다.
+    /// </summary>
+    /// <param name="nameLikePattern">파일명 LIKE 패턴 (이미 이스케이프된 값)</param>
+    /// <param name="ftsQuery">
+    ///   null  → 파일명 검색만 수행.<br/>
+    ///   값 있음 → 파일명 UNION 내용 검색.
+    /// </param>
+    public long CountSearchFiltered(
+        string    nameLikePattern,
+        string?   ftsQuery,
+        string[]  extensions,
+        long?     minSize,
+        long?     maxSize,
+        DateTime? after,
+        DateTime? before)
+    {
+        // ── Sub-query 1: 파일명 검색 ─────────────────────────
+        var sbName = new StringBuilder("""
+            SELECT file_path
+            FROM   file_index
+            WHERE  file_name LIKE $nameLike ESCAPE '\'
+            """);
+        AppendFilters(sbName, extensions, minSize, maxSize, after, before);
+
+        string sql;
+
+        if (ftsQuery is null)
+        {
+            // 파일명 검색만 → COUNT(*) FROM (sub)
+            sql = $"SELECT COUNT(*) FROM ({sbName})";
+        }
+        else
+        {
+            // ── Sub-query 2: 내용 검색 ────────────────────────
+            var rawFts = ftsQuery.Trim('"').Trim();
+            StringBuilder sbContent;
+
+            if (NeedsFtsLikeFallback(rawFts))
+            {
+                // 2자 이하 → LIKE 폴백
+                sbContent = new StringBuilder("""
+                    SELECT fi.file_path
+                    FROM   file_content fc
+                    JOIN   file_index fi ON fi.id = fc.file_id
+                    WHERE  fc.content LIKE $cLike ESCAPE '\'
+                    """);
+            }
+            else
+            {
+                // FTS5 MATCH
+                sbContent = new StringBuilder("""
+                    SELECT fi.file_path
+                    FROM   file_content
+                    JOIN   file_index fi ON fi.id = file_content.file_id
+                    WHERE  file_content MATCH $fts
+                    """);
+            }
+            AppendFilters(sbContent, extensions, minSize, maxSize, after, before, tableAlias: "fi");
+
+            // UNION 으로 두 결과를 합치고 COUNT(DISTINCT …) 효과를 낸다
+            // (UNION 은 기본으로 중복 제거)
+            sql = $"SELECT COUNT(*) FROM ({sbName}\nUNION\n{sbContent})";
+        }
+
+        using var cmd = Cmd(sql);
+        cmd.Parameters.AddWithValue("$nameLike", nameLikePattern);
+        AddFilterParams(cmd, extensions, minSize, maxSize, after, before);
+
+        if (ftsQuery is not null)
+        {
+            var rawFts = ftsQuery.Trim('"').Trim();
+            if (NeedsFtsLikeFallback(rawFts))
+                cmd.Parameters.AddWithValue("$cLike", $"%{rawFts}%");
+            else
+                cmd.Parameters.AddWithValue("$fts", ftsQuery);
+        }
+
+        try
+        {
+            var result = cmd.ExecuteScalar();
+            return result is null ? 0 : Convert.ToInt64(result);
+        }
+        catch (SqliteException)
+        {
+            return 0;   // FTS 문법 오류 등 → 0 반환 (UI 에서 -1로 처리)
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────
     // 검색 히스토리
     // ─────────────────────────────────────────────────────────
 
@@ -839,7 +940,18 @@ public class DatabaseManager : IDisposable
 
     public void Dispose()
     {
-        _connection?.Dispose();
+        try
+        {
+            // Close() 를 먼저 명시적으로 호출하여 미완료 트랜잭션·리더를 정리한다.
+            // Microsoft.Data.Sqlite 일부 버전에서 Close() 없이 Dispose() 하면
+            // 내부 NullReferenceException 이 발생할 수 있다.
+            _connection?.Close();
+            _connection?.Dispose();
+        }
+        catch { /* 이미 닫혔거나 내부 오류 → 무시 */ }
+
+        try { DbLock.Dispose(); } catch { }
+
         GC.SuppressFinalize(this);
     }
 }

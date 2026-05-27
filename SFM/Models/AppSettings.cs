@@ -7,12 +7,12 @@ public class AppSettings
 {
     // ── 검색 설정 ────────────────────────────────────────────
     /// <summary>true: 파일명 + 내용 동시 검색 / false: 파일명만 (빠른 모드)</summary>
-    public bool EnableContentSearch { get; set; } = true;
+    public bool EnableContentSearch { get; set; } = false;
 
     /// <summary>빈 배열 = 전체 확장자 허용. 예: [".txt", ".cs"]</summary>
     public string[] DefaultExtensions { get; set; } = [];
 
-    public int MaxSearchResults { get; set; } = 200;
+    public int MaxSearchResults { get; set; } = 500;
 
     // ── 인덱싱 설정 ──────────────────────────────────────────
     public string[] IndexRootPaths { get; set; } = [];
@@ -25,6 +25,14 @@ public class AppSettings
 
     /// <summary>내용 파싱 허용 최대 파일 크기 (MB). 초과 파일은 내용 미인덱싱.</summary>
     public int MaxFileSizeMB { get; set; } = 50;
+
+    /// <summary>
+    /// 내용 인덱싱 대상 확장자 목록.
+    /// 빈 배열 = 파서가 지원하는 전체 형식.
+    /// 값이 있으면 해당 확장자 파일만 내용을 파싱한다.
+    /// 예: [".docx", ".pdf", ".hwp", ...]
+    /// </summary>
+    public string[] ContentIndexExtensions { get; set; } = [];
 
     // ── 인덱싱 이력 ─────────────────────────────────────────────
     /// <summary>마지막 인덱싱 완료 시각. null = 한 번도 인덱싱하지 않음(첫 실행).</summary>
@@ -103,14 +111,15 @@ public class AppSettings
     /// <summary>모든 필드를 코드 기본값으로 되돌린다.</summary>
     public void ResetToDefault()
     {
-        EnableContentSearch  = true;
+        EnableContentSearch  = false;
         DefaultExtensions    = [];
-        MaxSearchResults     = 200;
+        MaxSearchResults     = 500;
 
-        IndexRootPaths       = [];
-        EnableContentIndexing = true;
-        ExcludedPaths        = [];
-        MaxFileSizeMB        = 50;
+        IndexRootPaths         = [];
+        EnableContentIndexing  = true;
+        ContentIndexExtensions = [];
+        ExcludedPaths          = [];
+        MaxFileSizeMB          = 50;
 
         WindowWidth          = 1024;
         WindowHeight         = 680;

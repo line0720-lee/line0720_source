@@ -33,6 +33,8 @@ partial class MainForm
         tsmiToolsReindex    = new ToolStripMenuItem();
         tsmiToolsSep2       = new ToolStripSeparator();
         tsmiToolsVacuum     = new ToolStripMenuItem();
+        tsmiToolsSep3       = new ToolStripSeparator();
+        tsmiToolsResetIndex = new ToolStripMenuItem();
         tsmiHelp            = new ToolStripMenuItem();
         tsmiHelpAbout       = new ToolStripMenuItem();
 
@@ -40,6 +42,7 @@ partial class MainForm
         pnlSearch           = new Panel();
         tblToolbar          = new TableLayoutPanel();
         txtSearch           = new TextBox();
+        btnSearchHint       = new Button();
         btnClear            = new Button();
         btnSearch           = new Button();
         lblAiNotice         = new Label();
@@ -64,7 +67,7 @@ partial class MainForm
         rtbSnippet          = new RichTextBox();
 
         // ── 결과 목록 ────────────────────────────────────────────
-        listResults         = new ListView();
+        listResults         = new ExtListView();
 
         // ── 좌우 분할 컨테이너 (결과 목록 | 미리보기) ────────────
         splitPreview        = new SplitContainer();
@@ -100,6 +103,8 @@ partial class MainForm
         lblOverlayDesc      = new Label();
         pbOverlay           = new ProgressBar();
         lblOverlayProgress  = new Label();
+        lblOverlayNote      = new Label();
+        btnOverlayClose     = new Button();
 
         // ── ListView 컬럼 ─────────────────────────────────────────
         colFileName         = new ColumnHeader();
@@ -168,12 +173,16 @@ partial class MainForm
         // 도구 메뉴
         tsmiTools.DropDownItems.AddRange([
             tsmiToolsReindex,
-            tsmiToolsSep2, tsmiToolsVacuum]);
+            tsmiToolsSep2, tsmiToolsVacuum,
+            tsmiToolsSep3, tsmiToolsResetIndex]);
         tsmiTools.Name = "tsmiTools"; tsmiTools.Text = "도구(&T)";
         tsmiToolsReindex.Name = "tsmiToolsReindex"; tsmiToolsReindex.Text = "전체 재인덱싱(&R)";
         tsmiToolsReindex.ShortcutKeys = Keys.F5;
         tsmiToolsSep2.Name = "tsmiToolsSep2";
         tsmiToolsVacuum.Name = "tsmiToolsVacuum"; tsmiToolsVacuum.Text = "데이터베이스 최적화(&O)";
+        tsmiToolsSep3.Name = "tsmiToolsSep3";
+        tsmiToolsResetIndex.Name = "tsmiToolsResetIndex"; tsmiToolsResetIndex.Text = "인덱스 초기화(&I)…";
+        tsmiToolsResetIndex.ForeColor = Color.FromArgb(180, 0, 0);
 
         // 도움말 메뉴
         tsmiHelp.DropDownItems.AddRange([tsmiHelpAbout]);
@@ -218,6 +227,23 @@ partial class MainForm
         btnSearch.Text                       = "검색";
 
         // ═════════════════════════════════════════════════════════
+        // 검색 힌트 버튼 (?)
+        // ═════════════════════════════════════════════════════════
+        btnSearchHint.Dock                              = DockStyle.Fill;
+        btnSearchHint.FlatStyle                         = FlatStyle.Flat;
+        btnSearchHint.FlatAppearance.BorderSize         = 0;
+        btnSearchHint.FlatAppearance.MouseOverBackColor = Color.FromArgb(20, 25, 118, 210);
+        btnSearchHint.FlatAppearance.MouseDownBackColor = Color.FromArgb(40, 25, 118, 210);
+        btnSearchHint.BackColor                         = Color.Transparent;
+        btnSearchHint.ForeColor                         = Color.FromArgb(25, 118, 210);
+        btnSearchHint.Font                              = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+        btnSearchHint.Margin                            = new Padding(2, 4, 0, 4);
+        btnSearchHint.Name                              = "btnSearchHint";
+        btnSearchHint.TabStop                           = false;
+        btnSearchHint.Text                              = "?";
+        btnSearchHint.Cursor                            = Cursors.Help;
+
+        // ═════════════════════════════════════════════════════════
         // AI 안내 레이블 (미리보기 패널 상단 오른쪽 영역)
         // ═════════════════════════════════════════════════════════
         lblAiNotice.Dock          = DockStyle.Fill;
@@ -230,22 +256,24 @@ partial class MainForm
         lblAiNotice.Name          = "lblAiNotice";
 
         // ═════════════════════════════════════════════════════════
-        // 툴바 TableLayoutPanel (4열: [검색창 70%] [✕ 32px] [검색 78px] [AI 안내 30%])
+        // 툴바 TableLayoutPanel (5열: [검색창 70%] [? 26px] [✕ 32px] [검색 78px] [AI 안내 30%])
         // ═════════════════════════════════════════════════════════
-        tblToolbar.ColumnCount = 4;
-        tblToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70F));   // 검색창
+        tblToolbar.ColumnCount = 5;
+        tblToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  70F));  // 검색창
+        tblToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 26F));  // ? 힌트
         tblToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 32F));  // 지우기
         tblToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 78F));  // 검색버튼
-        tblToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30F));   // AI 안내
+        tblToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  30F));  // AI 안내
         tblToolbar.RowCount = 1;
         tblToolbar.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         tblToolbar.Dock    = DockStyle.Fill;
         tblToolbar.Name    = "tblToolbar";
         tblToolbar.Padding = new Padding(6, 7, 6, 7);
-        tblToolbar.Controls.Add(txtSearch,   0, 0);
-        tblToolbar.Controls.Add(btnClear,    1, 0);
-        tblToolbar.Controls.Add(btnSearch,   2, 0);
-        tblToolbar.Controls.Add(lblAiNotice, 3, 0);
+        tblToolbar.Controls.Add(txtSearch,     0, 0);
+        tblToolbar.Controls.Add(btnSearchHint, 1, 0);
+        tblToolbar.Controls.Add(btnClear,      2, 0);
+        tblToolbar.Controls.Add(btnSearch,     3, 0);
+        tblToolbar.Controls.Add(lblAiNotice,   4, 0);
 
         // ═════════════════════════════════════════════════════════
         // 옵션 패널
@@ -327,11 +355,11 @@ partial class MainForm
         // ═════════════════════════════════════════════════════════
         // ListView
         // ═════════════════════════════════════════════════════════
-        colFileName.Text = "이름";    colFileName.Width = 260;
-        colPath.Text     = "경로";    colPath.Width     = 400;
-        colSize.Text     = "파일 크기"; colSize.TextAlign = HorizontalAlignment.Right; colSize.Width = 105;
-        colModified.Text = "수정 날짜"; colModified.Width = 145;
-        colMatch.Text    = "유형";    colMatch.Width    = 80;
+        colFileName.Text = "이름";    colFileName.Width = 240;   // AutoResizeColumns()가 Shown 에서 재조정
+        colPath.Text     = "경로";    colPath.Width     = 360;
+        colSize.Text     = "파일 크기"; colSize.TextAlign = HorizontalAlignment.Right; colSize.Width = 95;
+        colModified.Text = "수정 날짜"; colModified.Width = 138;
+        colMatch.Text    = "유형";    colMatch.Width    = 75;
 
         listResults.Columns.AddRange([colFileName, colPath, colSize, colModified, colMatch]);
         listResults.ContextMenuStrip = cmsResult;
@@ -416,58 +444,93 @@ partial class MainForm
         cmsResult.Name = "cmsResult";
 
         // ═════════════════════════════════════════════════════════
-        // 첫 실행 오버레이 (기본 hidden)
+        // 첫 실행 오버레이 (기본 hidden)  — 카드 크기 520 × 256
         // ═════════════════════════════════════════════════════════
+
+        // 🤖 AI 아이콘
         lblOverlayIcon.AutoSize   = false;
-        lblOverlayIcon.Location   = new Point(0, 22);
-        lblOverlayIcon.Size       = new Size(460, 44);
-        lblOverlayIcon.Text       = "🔍";
-        lblOverlayIcon.Font       = new Font("Segoe UI Emoji", 24F);
+        lblOverlayIcon.Location   = new Point(0, 18);
+        lblOverlayIcon.Size       = new Size(520, 50);
+        lblOverlayIcon.Text       = "🤖";
+        lblOverlayIcon.Font       = new Font("Segoe UI Emoji", 26F);
         lblOverlayIcon.TextAlign  = ContentAlignment.MiddleCenter;
         lblOverlayIcon.Name       = "lblOverlayIcon";
         lblOverlayIcon.BackColor  = Color.Transparent;
 
+        // 메인 제목
         lblOverlayTitle.AutoSize  = false;
         lblOverlayTitle.Location  = new Point(0, 72);
-        lblOverlayTitle.Size      = new Size(460, 28);
-        lblOverlayTitle.Text      = "첫 실행 인덱싱 중...";
-        lblOverlayTitle.Font      = new Font("Segoe UI", 13F, FontStyle.Bold);
+        lblOverlayTitle.Size      = new Size(520, 32);
+        lblOverlayTitle.Text      = "AI가 내 컴퓨터를 학습하고 있습니다";
+        lblOverlayTitle.Font      = new Font("Segoe UI", 14F, FontStyle.Bold);
         lblOverlayTitle.TextAlign = ContentAlignment.MiddleCenter;
         lblOverlayTitle.Name      = "lblOverlayTitle";
         lblOverlayTitle.BackColor = Color.Transparent;
 
+        // 설명
         lblOverlayDesc.AutoSize   = false;
-        lblOverlayDesc.Location   = new Point(0, 104);
-        lblOverlayDesc.Size       = new Size(460, 20);
-        lblOverlayDesc.Text       = "파일을 수집하고 있습니다. 잠시 기다려 주세요...";
-        lblOverlayDesc.Font       = new Font("Segoe UI", 9F);
+        lblOverlayDesc.Location   = new Point(0, 108);
+        lblOverlayDesc.Size       = new Size(520, 22);
+        lblOverlayDesc.Text       = "파일 내용을 분석하고 검색 인덱스를 구축하고 있습니다";
+        lblOverlayDesc.Font       = new Font("Segoe UI", 9.5F);
         lblOverlayDesc.TextAlign  = ContentAlignment.MiddleCenter;
-        lblOverlayDesc.ForeColor  = Color.FromArgb(100, 116, 139);
+        lblOverlayDesc.ForeColor  = Color.FromArgb(80, 100, 130);
         lblOverlayDesc.Name       = "lblOverlayDesc";
         lblOverlayDesc.BackColor  = Color.Transparent;
 
-        pbOverlay.Location        = new Point(40, 138);
-        pbOverlay.Size            = new Size(380, 8);
-        pbOverlay.Style           = ProgressBarStyle.Marquee;
-        pbOverlay.MarqueeAnimationSpeed = 25;
-        pbOverlay.Name            = "pbOverlay";
+        // 진행 바
+        pbOverlay.Location              = new Point(40, 148);
+        pbOverlay.Size                  = new Size(440, 12);
+        pbOverlay.Style                 = ProgressBarStyle.Marquee;
+        pbOverlay.MarqueeAnimationSpeed = 20;
+        pbOverlay.Name                  = "pbOverlay";
 
+        // 진행 텍스트 (파일 수 / 퍼센트)
         lblOverlayProgress.AutoSize  = false;
-        lblOverlayProgress.Location  = new Point(0, 156);
-        lblOverlayProgress.Size      = new Size(460, 18);
-        lblOverlayProgress.Text      = "준비 중...";
+        lblOverlayProgress.Location  = new Point(0, 168);
+        lblOverlayProgress.Size      = new Size(520, 20);
+        lblOverlayProgress.Text      = "파일 목록 수집 중...";
         lblOverlayProgress.Font      = new Font("Segoe UI", 8.5F);
         lblOverlayProgress.TextAlign = ContentAlignment.MiddleCenter;
-        lblOverlayProgress.ForeColor = Color.FromArgb(120, 130, 150);
+        lblOverlayProgress.ForeColor = Color.FromArgb(110, 125, 148);
         lblOverlayProgress.Name      = "lblOverlayProgress";
         lblOverlayProgress.BackColor = Color.Transparent;
 
-        pnlOverlayCard.Size           = new Size(460, 190);
+        // 안내 메모
+        lblOverlayNote.AutoSize   = false;
+        lblOverlayNote.Location   = new Point(0, 196);
+        lblOverlayNote.Size       = new Size(520, 36);
+        lblOverlayNote.Text       = "✅ 최초 실행 시 한 번만 수행됩니다.\r\n    이후에는 자동으로 업데이트됩니다.";
+        lblOverlayNote.Font       = new Font("Segoe UI", 8.5F, FontStyle.Italic);
+        lblOverlayNote.TextAlign  = ContentAlignment.MiddleCenter;
+        lblOverlayNote.ForeColor  = Color.FromArgb(140, 160, 190);
+        lblOverlayNote.Name       = "lblOverlayNote";
+        lblOverlayNote.BackColor  = Color.Transparent;
+
+        // 닫기 버튼 (인덱싱 완료 후 표시)
+        btnOverlayClose.AutoSize  = false;
+        btnOverlayClose.Location  = new Point(170, 242);
+        btnOverlayClose.Size      = new Size(180, 38);
+        btnOverlayClose.Text      = "닫기";
+        btnOverlayClose.Font      = new Font("Segoe UI", 10F, FontStyle.Bold);
+        btnOverlayClose.BackColor = Color.FromArgb(25, 118, 210);
+        btnOverlayClose.ForeColor = Color.White;
+        btnOverlayClose.FlatStyle = FlatStyle.Flat;
+        btnOverlayClose.FlatAppearance.BorderSize  = 0;
+        btnOverlayClose.FlatAppearance.MouseOverBackColor  = Color.FromArgb(21, 101, 192);
+        btnOverlayClose.FlatAppearance.MouseDownBackColor  = Color.FromArgb(13, 71, 161);
+        btnOverlayClose.Cursor    = Cursors.Hand;
+        btnOverlayClose.Name      = "btnOverlayClose";
+        btnOverlayClose.TabIndex  = 0;
+        btnOverlayClose.Visible   = false;   // 인덱싱 중에는 숨김
+
+        pnlOverlayCard.Size           = new Size(520, 298);
         pnlOverlayCard.BackColor      = Color.White;
         pnlOverlayCard.Name           = "pnlOverlayCard";
         pnlOverlayCard.Controls.AddRange([
             lblOverlayIcon, lblOverlayTitle, lblOverlayDesc,
-            pbOverlay, lblOverlayProgress]);
+            pbOverlay, lblOverlayProgress, lblOverlayNote,
+            btnOverlayClose]);
 
         pnlOverlay.BackColor          = Color.FromArgb(30, 35, 50);
         pnlOverlay.Name               = "pnlOverlay";
@@ -531,12 +594,15 @@ partial class MainForm
     private ToolStripMenuItem    tsmiToolsReindex    = null!;
     private ToolStripSeparator   tsmiToolsSep2       = null!;
     private ToolStripMenuItem    tsmiToolsVacuum     = null!;
+    private ToolStripSeparator   tsmiToolsSep3       = null!;
+    private ToolStripMenuItem    tsmiToolsResetIndex = null!;
     private ToolStripMenuItem    tsmiHelp            = null!;
     private ToolStripMenuItem    tsmiHelpAbout       = null!;
 
     private Panel                pnlSearch           = null!;
     private TableLayoutPanel     tblToolbar          = null!;
     private TextBox              txtSearch           = null!;
+    private Button               btnSearchHint       = null!;
     private Button               btnClear            = null!;
     private Button               btnSearch           = null!;
     private Label                lblAiNotice         = null!;
@@ -560,7 +626,7 @@ partial class MainForm
 
     private SplitContainer       splitPreview        = null!;
 
-    private ListView             listResults         = null!;
+    private ExtListView          listResults         = null!;
     private StatusStrip          statusStrip         = null!;
     private ToolStripStatusLabel sslResultCount      = null!;
     private ToolStripStatusLabel sslIndexStatus      = null!;
@@ -589,6 +655,8 @@ partial class MainForm
     private Label                lblOverlayDesc      = null!;
     private ProgressBar          pbOverlay           = null!;
     private Label                lblOverlayProgress  = null!;
+    private Label                lblOverlayNote      = null!;
+    private Button               btnOverlayClose     = null!;
 
     private ColumnHeader         colFileName         = null!;
     private ColumnHeader         colPath             = null!;
