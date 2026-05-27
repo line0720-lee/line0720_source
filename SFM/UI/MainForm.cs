@@ -20,8 +20,9 @@ public partial class MainForm : Form
     private readonly FileWatcher     _watcher;
 
     // 미리보기 파일 파싱 / 비동기 취소
-    private readonly FileParser              _parser     = new();
+    private readonly FileParser               _parser     = new();
     private          CancellationTokenSource? _snippetCts;
+    private          string?                  _currentSnippetPath;   // 현재 표시 중인 파일 경로 (깜빡임 방지)
 
     // ─────────────────────────────────────────────────────────
     // UI 상태
@@ -134,19 +135,17 @@ public partial class MainForm : Form
         InitPagination();
 
         // ── 이벤트 연결 전에 내용 검색 UI 초기화 ────────────────────────────────
-        // EnableContentSearch = false (첫 실행 또는 내용 학습 미완료): 체크박스 비활성(회색)
-        // EnableContentSearch = true  (내용 학습 완료 후):              체크박스 활성화
-        // EnableContentIndexing 이 true 라도 내용 검색이 꺼져 있으면 인덱싱도 막는다.
-        if (!_settings.EnableContentSearch)
-            _settings.EnableContentIndexing = false;   // 메모리만 변경 — 저장 안 함
+        // EnableContentIndexing = true  → 학습 완료: 체크박스 활성(사용자가 켤 수 있음)
+        // EnableContentIndexing = false → 학습 전/리셋: 체크박스 비활성(회색)
+        // EnableContentSearch   = 사용자 체크 상태 (학습 완료 후 사용자가 직접 선택)
 
         // 내용 검색 UI — 항상 표시하되, 내용 학습 완료 전까지 비활성(회색)
         chkContent.Checked         = _settings.EnableContentSearch;
         tsmiSearchContent.Checked  = _settings.EnableContentSearch;
         chkContent.Visible         = true;
         tsmiSearchContent.Visible  = true;
-        chkContent.Enabled         = _settings.EnableContentSearch;
-        tsmiSearchContent.Enabled  = _settings.EnableContentSearch;
+        chkContent.Enabled         = _settings.EnableContentIndexing;   // 학습 완료 여부로 활성/비활성
+        tsmiSearchContent.Enabled  = _settings.EnableContentIndexing;
 
         // 오버레이 카드 Paint — 둥근 테두리
         pnlOverlayCard.Paint += OnOverlayCardPaint;
@@ -370,6 +369,17 @@ public partial class MainForm : Form
             _settings.Save();   // 체크 상태를 즉시 저장 — 재시작 후에도 유지
             _ = RunSearchAsync();
         };
+
+        // 내용 검색 비활성(학습 중) 상태에서 체크박스 영역 클릭 → 안내 팝업
+        // Enabled=false 인 컨트롤은 클릭 이벤트가 부모로 버블링된다.
+        pnlOptions.MouseDown += (_, e) =>
+        {
+            if (chkContent.Enabled) return;
+            var bounds = new Rectangle(chkContent.Location, chkContent.Size);
+            if (bounds.Contains(e.Location))
+                ShowContentSearchNotReadyMessage();
+        };
+
         EventHandler typeChanged = (_, _) => _ = RunSearchAsync();
         chkTypeDoc.CheckedChanged   += typeChanged;
         chkTypePdf.CheckedChanged   += typeChanged;
@@ -579,20 +589,23 @@ public partial class MainForm : Form
                     {
                         _isFirstRunStage2 = false;
 
-                        // 내용 검색 활성화 + 설정 저장
-                        _settings.EnableContentSearch   = true;
+                        // 내용 인덱싱 준비 완료 저장 (검색 ON/OFF 는 사용자가 직접 선택)
                         _settings.EnableContentIndexing = true;
                         _settings.Save();
 
-                        // 내용 검색 UI 활성화 (Visible 은 이미 true)
-                        chkContent.Checked         = true;
-                        tsmiSearchContent.Checked  = true;
+                        // 체크박스 활성화 — Checked 는 false 유지 (사용자가 선택)
                         chkContent.Enabled         = true;
                         tsmiSearchContent.Enabled  = true;
+                        chkContent.Checked         = false;
+                        tsmiSearchContent.Checked  = false;
+                        // 글자색 정상 복구 (회색 → 검정/흰색)
+                        chkContent.ForeColor = _settings.IsDarkMode
+                            ? Color.FromArgb(224, 224, 235)
+                            : Color.FromArgb(26,  32,  44);
 
                         sslIndexStatus.Text = r.Added > 0
-                            ? $"📄 내용 학습 완료 ({r.Added:N0}개 문서)  —  내용 검색이 활성화되었습니다"
-                            : "📄 내용 학습 완료  —  내용 검색이 활성화되었습니다";
+                            ? $"📄 내용 학습 완료 ({r.Added:N0}개 문서)  —  F4 로 내용 검색을 켤 수 있습니다"
+                            : "📄 내용 학습 완료  —  F4 로 내용 검색을 켤 수 있습니다";
                         RefreshDbStats();
                         return;
                     }
@@ -632,6 +645,7 @@ public partial class MainForm : Form
             }
             catch (ObjectDisposedException) { }
             catch (InvalidOperationException) { }
+            catch (Exception ex) { Debug.WriteLine($"[IndexCompleted] {ex}"); }   // 배경 스레드로 탈출 방지
         };
 
         _indexer.IndexErrorOccurred += err => Debug.WriteLine($"[IndexError] {err.FilePath}: {err.Message}");
@@ -750,7 +764,8 @@ public partial class MainForm : Form
         btnSearchHint.FlatAppearance.MouseDownBackColor = Color.FromArgb(55, 100, 160, 240);
         _hintPopup?.SetDark(true);
 
-        chkContent.ForeColor = cText; lblFilter.ForeColor = cSub;
+        chkContent.ForeColor = chkContent.Enabled ? cText : Color.FromArgb(85, 85, 110);
+        lblFilter.ForeColor = cSub;
         chkTypeDoc.ForeColor = chkTypePdf.ForeColor =
             chkTypeImage.ForeColor = chkTypeCode.ForeColor = cText;
         lblDbInfo.ForeColor = cSub;
@@ -821,7 +836,8 @@ public partial class MainForm : Form
         btnSearchHint.FlatAppearance.MouseDownBackColor = Color.FromArgb(220, 235, 255);
         _hintPopup?.SetDark(false);
 
-        chkContent.ForeColor = cText; lblFilter.ForeColor = cSub;
+        chkContent.ForeColor = chkContent.Enabled ? cText : Color.FromArgb(160, 160, 170);
+        lblFilter.ForeColor = cSub;
         chkTypeDoc.ForeColor = chkTypePdf.ForeColor =
             chkTypeImage.ForeColor = chkTypeCode.ForeColor = cText;
         lblDbInfo.ForeColor = cSub;
@@ -959,6 +975,7 @@ public partial class MainForm : Form
 
         if (r is null)
         {
+            _currentSnippetPath = null;
             lblSnippetPath.Text = "항목을 선택하면 미리보기가 표시됩니다";
             rtbSnippet.Clear();
             return;
@@ -970,16 +987,23 @@ public partial class MainForm : Form
         var clrText = _settings.IsDarkMode ? Color.FromArgb(224, 224, 235) : Color.FromArgb(26, 32, 44);
         var clrSub  = _settings.IsDarkMode ? Color.FromArgb(140, 140, 165) : SystemColors.GrayText;
 
-        // 로딩 표시
-        rtbSnippet.Clear();
-        rtbSnippet.ForeColor = clrSub;
-        rtbSnippet.Text = "내용 불러오는 중…";
+        // ── 깜빡임 방지 ────────────────────────────────────────────
+        // 동일 파일 재로딩(자동 재검색 등)이면 "로딩 중…" 표시를 생략하고
+        // 기존 내용을 유지한 채 백그라운드에서 조용히 갱신한다.
+        bool isSamePath = r.FilePath.Equals(_currentSnippetPath, StringComparison.OrdinalIgnoreCase);
+        if (!isSamePath)
+        {
+            _currentSnippetPath = r.FilePath;
+            rtbSnippet.Clear();
+            rtbSnippet.ForeColor = clrSub;
+            rtbSnippet.Text = "내용 불러오는 중…";
+        }
 
-        var cts      = new CancellationTokenSource();
-        _snippetCts  = cts;
-        var keyword         = txtSearch.Text.Trim();
-        var highlightWord   = Searcher.StripWildcards(keyword);   // 와일드카드 제거 후 하이라이트
-        var filePath        = r.FilePath;
+        var cts           = new CancellationTokenSource();
+        _snippetCts       = cts;
+        var keyword       = txtSearch.Text.Trim();
+        var highlightWord = Searcher.StripWildcards(keyword);   // 와일드카드 제거 후 하이라이트
+        var filePath      = r.FilePath;
 
         _ = Task.Run(async () =>
         {
@@ -1000,19 +1024,31 @@ public partial class MainForm : Form
                     Invoke(() =>
                     {
                         if (cts.IsCancellationRequested) return;
-                        rtbSnippet.Clear();
 
-                        if (string.IsNullOrEmpty(content))
+                        // WM_SETREDRAW(false) 로 텍스트 설정 + 하이라이트 적용을 한 번에 그림
+                        // → Select() 루프마다 리페인트 하던 깜빡임 제거
+                        NativeMethods.SendMessage(rtbSnippet.Handle, NativeMethods.WM_SETREDRAW, 0, 0);
+                        try
                         {
-                            rtbSnippet.ForeColor = clrSub;
-                            rtbSnippet.Text = "(미리보기를 지원하지 않는 파일 형식입니다)";
+                            rtbSnippet.Clear();
+                            if (string.IsNullOrEmpty(content))
+                            {
+                                rtbSnippet.ForeColor = clrSub;
+                                rtbSnippet.Text = "(미리보기를 지원하지 않는 파일 형식입니다)";
+                            }
+                            else
+                            {
+                                rtbSnippet.ForeColor = clrText;
+                                rtbSnippet.Text = content + (truncated ? "\n\n[…이하 내용 생략…]" : string.Empty);
+                                if (!string.IsNullOrEmpty(highlightWord))
+                                    HighlightKeywordInSnippet(highlightWord);
+                            }
                         }
-                        else
+                        finally
                         {
-                            rtbSnippet.ForeColor = clrText;
-                            rtbSnippet.Text = content + (truncated ? "\n\n[…이하 내용 생략…]" : string.Empty);
-                            if (!string.IsNullOrEmpty(highlightWord))
-                                HighlightKeywordInSnippet(highlightWord);
+                            NativeMethods.SendMessage(rtbSnippet.Handle, NativeMethods.WM_SETREDRAW, 1, 0);
+                            rtbSnippet.Invalidate();
+                            rtbSnippet.Update();   // 즉시 단일 페인트 — 중간 상태 노출 없음
                         }
                     });
                 }
@@ -1074,7 +1110,13 @@ public partial class MainForm : Form
             ResetSortHeaders(); UpdateSnippetPanel(null);
             Text = "SFM — Smart File Manager"; return;
         }
-        if (keyword != _lastKeyword)
+
+        // 새 키워드 검색: 상태 초기화
+        // 동일 키워드 재검색(자동 재인덱싱 등): 현재 미리보기 파일 경로 기억
+        bool isNewSearch = keyword != _lastKeyword;
+        string? prevSelectedPath = isNewSearch ? null : GetSelectedResult()?.FilePath;
+
+        if (isNewSearch)
         {
             _searchPage = 0; _totalCount = -1; _lastKeyword = keyword;
             ResetSortHeaders();
@@ -1115,7 +1157,23 @@ public partial class MainForm : Form
             if (_results.Count > 0)
             {
                 if (tsmiViewAutoCol.Checked) AutoResizeColumns();
-                if (!splitPreview.Panel2Collapsed) UpdateSnippetPanel(_results[0]);
+                if (!splitPreview.Panel2Collapsed)
+                {
+                    if (prevSelectedPath is not null)
+                    {
+                        // 동일 키워드 재검색(자동 인덱싱 등):
+                        // 이전에 보던 파일이 결과에 있으면 그 파일 미리보기 유지,
+                        // 결과에서 사라졌으면 첫 번째 결과로 대체.
+                        int idx = _results.FindIndex(r =>
+                            r.FilePath.Equals(prevSelectedPath, StringComparison.OrdinalIgnoreCase));
+                        UpdateSnippetPanel(idx >= 0 ? _results[idx] : _results[0]);
+                    }
+                    else
+                    {
+                        // 새 키워드 검색 또는 이전 선택 없음: 첫 번째 결과 미리보기
+                        UpdateSnippetPanel(_results[0]);
+                    }
+                }
             }
         }
         catch (Microsoft.Data.Sqlite.SqliteException sqEx) when (sqEx.SqliteErrorCode == 11)
@@ -1250,16 +1308,42 @@ public partial class MainForm : Form
 
     private void ShowRecentDropdown()
     {
-        var recents = _db.GetRecentSearches(8);
-        if (recents.Count == 0) return;
-        _recentBox.Items.Clear();
-        foreach (var s in recents) _recentBox.Items.Add(s);
-        var screenPt = txtSearch.Parent!.PointToScreen(txtSearch.Location);
-        var formPt   = PointToClient(screenPt);
-        _recentBox.Location = new Point(formPt.X, pnlSearch.Bottom);
-        _recentBox.Width    = txtSearch.Width;
-        _recentBox.Height   = Math.Min(recents.Count * 22 + 4, 180);
-        _recentBox.BringToFront(); _recentBox.Visible = true;
+        // ReadLock 으로 _readConn 에서 읽기 — 내용 인덱싱(_writeConn) 과 완전 독립.
+        _ = Task.Run(async () =>
+        {
+            await _db.ReadLock.WaitAsync().ConfigureAwait(false);
+            List<string> recents;
+            try { recents = _db.GetRecentSearches(10); }
+            finally { _db.ReadLock.Release(); }
+
+            if (recents.Count == 0 || IsDisposed || !IsHandleCreated) return;
+            BeginInvoke(() =>
+            {
+                _recentBox.Items.Clear();
+                foreach (var s in recents) _recentBox.Items.Add(s);
+                var screenPt = txtSearch.Parent!.PointToScreen(txtSearch.Location);
+                var formPt   = PointToClient(screenPt);
+                _recentBox.Location = new Point(formPt.X, pnlSearch.Bottom);
+                _recentBox.Width    = txtSearch.Width;
+                _recentBox.Height   = Math.Min(recents.Count * 22 + 4, 180);
+                _recentBox.BringToFront(); _recentBox.Visible = true;
+            });
+        });
+    }
+
+    /// <summary>
+    /// 내용 검색 기능이 아직 준비되지 않았을 때 (학습 중) 사용자에게 안내 팝업을 표시한다.
+    /// F4 단축키 또는 비활성 상태 체크박스 클릭 시 호출된다.
+    /// </summary>
+    private void ShowContentSearchNotReadyMessage()
+    {
+        MessageBox.Show(
+            "내용 학습이 완료되면 해당 기능이 활성화됩니다.\n\n" +
+            "문서 내용 학습이 백그라운드에서 진행 중입니다.\n" +
+            "학습 완료 시 자동으로 내용 검색(F4)이 활성화됩니다.",
+            "내용 검색 — 준비 중",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
     }
 
     // ─────────────────────────────────────────────────────────
@@ -1303,7 +1387,8 @@ public partial class MainForm : Form
             case Keys.Control | Keys.C when listResults.Focused:
                 CopySelectedPaths(); return true;
             case Keys.F4:
-                if (!chkContent.Enabled) return true;   // 내용 학습 완료 전 — 단축키 무시
+                if (!chkContent.Enabled)
+                { ShowContentSearchNotReadyMessage(); return true; }
                 chkContent.Checked = !chkContent.Checked;
                 tsmiSearchContent.Checked = chkContent.Checked; return true;
         }
@@ -1507,6 +1592,10 @@ public partial class MainForm : Form
         tsmiSearchContent.Checked  = false;
         chkContent.Enabled         = false;
         tsmiSearchContent.Enabled  = false;
+        // 글자색 회색으로 (비활성 상태 시각적 표시)
+        chkContent.ForeColor = _settings.IsDarkMode
+            ? Color.FromArgb(85, 85, 110)
+            : Color.FromArgb(160, 160, 170);
 
         // ④ 검색 결과 초기화
         _results = []; _searchPage = 0; _totalCount = -1; _lastKeyword = string.Empty;
@@ -1524,9 +1613,7 @@ public partial class MainForm : Form
     // ─────────────────────────────────────────────────────────
     /// <summary>
     /// DB 통계를 백그라운드에서 읽어 UI 를 갱신한다 (fire-and-forget).
-    /// GetIndexStats() 를 UI 스레드에서 직접 호출하면 Stage 2 가 DbLock 을 보유한 채
-    /// FTS5 트랜잭션을 처리하는 동안 SQLite 내부 뮤텍스가 UI 스레드를 블로킹하여
-    /// "응답없음" 이 발생한다. Task.Run + DbLock 으로 완전히 분리한다.
+    /// ReadLock 을 사용하여 _readConn 전용으로 읽기 — 내용 인덱싱(_writeConn) 과 완전 독립.
     /// </summary>
     private void RefreshDbStats()
     {
@@ -1535,7 +1622,7 @@ public partial class MainForm : Form
             try
             {
                 if (IsDisposed) return;
-                await _db.DbLock.WaitAsync().ConfigureAwait(false);
+                await _db.ReadLock.WaitAsync().ConfigureAwait(false);
                 try
                 {
                     var s = _db.GetIndexStats();
@@ -1546,7 +1633,7 @@ public partial class MainForm : Form
                             sslDbStats.Text = $"인덱스: {s.TotalFiles:N0}개 파일 ({s.DatabaseSizeMb:F1} MB)";
                         });
                 }
-                finally { _db.DbLock.Release(); }
+                finally { _db.ReadLock.Release(); }
             }
             catch { }
         });

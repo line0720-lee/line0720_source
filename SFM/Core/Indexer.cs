@@ -144,13 +144,13 @@ public sealed class Indexer
                 RaiseProgress(files[^1], 0, total, "수집 완료");
 
             // ── Phase 2: 메타 + 내용 인덱싱 (배치 트랜잭션) ─────────────
-            // 배치마다 DbLock 을 획득/해제하여 검색 요청이 배치 사이 틈에 실행될 수 있게 한다.
+            // 배치마다 WriteLock 을 획득/해제하여 검색 요청이 배치 사이 틈에 실행될 수 있게 한다.
             for (int batchStart = 0; batchStart < files.Count; batchStart += BatchSize)
             {
                 ct.ThrowIfCancellationRequested();
                 int batchEnd = Math.Min(batchStart + BatchSize, files.Count);
 
-                await _db.DbLock.WaitAsync(ct).ConfigureAwait(false);   // 배치 시작 전 락 획득
+                await _db.WriteLock.WaitAsync(ct).ConfigureAwait(false);   // 배치 시작 전 락 획득
                 try
                 {
                     using var tx = _db.BeginTransaction();
@@ -189,7 +189,7 @@ public sealed class Indexer
                 }
                 finally
                 {
-                    _db.DbLock.Release();   // 배치 끝나면 즉시 해제
+                    _db.WriteLock.Release();   // 배치 끝나면 즉시 해제
                 }
 
                 // 배치 사이에 스레드 스케줄러에 양보 → 대기 중인 검색 요청이 실행될 기회
@@ -226,15 +226,17 @@ public sealed class Indexer
         _isBulkIndexing = true;
         try
         {
-            // ── DB 스냅샷 읽기 (락 보호) ─────────────────────────────
+            // ── DB 스냅샷 읽기 (ReadLock — _readConn 보호) ───────────
+            // GetAllIndexedFiles() 는 _readConn(ReadCmd) 을 사용하므로 ReadLock 이 올바른 락.
+            // WriteLock 을 사용하면 _readConn 이 보호되지 않아 Searcher 와 동시 접근 발생.
             Dictionary<string, FileIndex> indexed;
-            await _db.DbLock.WaitAsync(ct).ConfigureAwait(false);
+            await _db.ReadLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
                 indexed = _db.GetAllIndexedFiles()
                     .ToDictionary(f => f.FilePath, StringComparer.OrdinalIgnoreCase);
             }
-            finally { _db.DbLock.Release(); }
+            finally { _db.ReadLock.Release(); }
 
             // 디스크 파일 수집 (파일시스템 접근 — 락 불필요)
             var diskFiles = CollectFiles(_settings.IndexRootPaths)
@@ -249,10 +251,10 @@ public sealed class Indexer
             foreach (var path in toDelete)
             {
                 ct.ThrowIfCancellationRequested();
-                await _db.DbLock.WaitAsync(ct).ConfigureAwait(false);
+                await _db.WriteLock.WaitAsync(ct).ConfigureAwait(false);
                 try   { _db.DeleteFile(path); deleted++; }
                 catch (Exception ex) { errors++; RaiseError(path, ex); }
-                finally { _db.DbLock.Release(); }
+                finally { _db.WriteLock.Release(); }
                 RaiseProgress(path, ++processed, totalOps, "삭제");
             }
 
@@ -307,7 +309,7 @@ public sealed class Indexer
                 // ── Phase B: 락 점유 → DB 쓰기만 수행 (빠른 작업) ──────
                 if (toWrite.Count > 0)
                 {
-                    await _db.DbLock.WaitAsync(ct).ConfigureAwait(false);
+                    await _db.WriteLock.WaitAsync(ct).ConfigureAwait(false);
                     try
                     {
                         using var batchTx = _db.BeginTransaction();
@@ -342,7 +344,7 @@ public sealed class Indexer
                         catch (OperationCanceledException) { batchTx.Rollback(); throw; }
                         catch { batchTx.Rollback(); }
                     }
-                    finally { _db.DbLock.Release(); }
+                    finally { _db.WriteLock.Release(); }
                 }
 
                 await Task.Yield(); // 배치 사이에 검색 실행 기회
@@ -380,14 +382,14 @@ public sealed class Indexer
             }
             if (ShouldExcludeFile(info)) return;
 
-            await _db.DbLock.WaitAsync().ConfigureAwait(false);
+            await _db.WriteLock.WaitAsync().ConfigureAwait(false);
             try
             {
                 await IndexCoreAsync(filePath).ConfigureAwait(false);
             }
             finally
             {
-                _db.DbLock.Release();
+                _db.WriteLock.Release();
             }
 
             sw.Stop();
@@ -405,9 +407,9 @@ public sealed class Indexer
         // 대량 인덱싱 중에는 스킵 — UpdateIndexAsync 가 다음 주기에 삭제를 처리한다.
         if (_isBulkIndexing) return;
 
-        _db.DbLock.Wait();
+        _db.WriteLock.Wait();
         try { _db.DeleteFile(filePath); }
-        finally { _db.DbLock.Release(); }
+        finally { _db.WriteLock.Release(); }
     }
 
     // ─────────────────────────────────────────────────────────
@@ -431,9 +433,9 @@ public sealed class Indexer
 
         try
         {
-            // DB 에서 내용 미인덱싱 파일 목록 수집 (락 보호)
+            // DB 에서 내용 미인덱싱 파일 목록 수집 (ReadLock — _readConn 보호)
             List<FileIndex> files;
-            await _db.DbLock.WaitAsync(ct).ConfigureAwait(false);
+            await _db.ReadLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
                 files = _db.GetAllIndexedFiles()
@@ -441,7 +443,7 @@ public sealed class Indexer
                         && _contentIndexExts.Contains(Path.GetExtension(f.FilePath)))
                     .ToList();
             }
-            finally { _db.DbLock.Release(); }
+            finally { _db.ReadLock.Release(); }
 
             total = files.Count;
 
@@ -476,7 +478,7 @@ public sealed class Indexer
                 // ── Step 2: DB 저장 (락 보호, 쓰레드풀에서 실행) ──────
                 if (parsed.Count > 0)
                 {
-                    await _db.DbLock.WaitAsync(ct).ConfigureAwait(false);
+                    await _db.WriteLock.WaitAsync(ct).ConfigureAwait(false);
                     try
                     {
                         using var tx = _db.BeginTransaction();
@@ -492,7 +494,7 @@ public sealed class Indexer
                         catch (OperationCanceledException) { tx.Rollback(); throw; }
                         catch { tx.Rollback(); }
                     }
-                    finally { _db.DbLock.Release(); }
+                    finally { _db.WriteLock.Release(); }
                 }
 
                 await Task.Yield(); // 배치 사이 검색 실행 기회

@@ -56,6 +56,9 @@ internal static class NativeMethods
     internal const uint SHGFI_USEFILEATTRIBUTES = 0x0000_0010;
     internal const uint FILE_ATTRIBUTE_NORMAL   = 0x0000_0080;
 
+    // ── RichTextBox 리페인트 제어 ────────────────────────────
+    internal const int WM_SETREDRAW = 0x000B;   // 0=억제, 1=재개
+
     // ── ListView 더블 버퍼링 ──────────────────────────────────
     internal const int LVM_SETEXTENDEDLISTVIEWSTYLE = 0x1036;
     internal const int LVS_EX_DOUBLEBUFFER          = 0x0001_0000;

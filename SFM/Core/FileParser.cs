@@ -21,6 +21,12 @@ public sealed class FileParser
     /// <summary>최대 크기 초과 파일을 파싱할 때 읽을 바이트(문자) 한도 = 500 KB.</summary>
     private const int FallbackLimit = 500 * 1024;
 
+    // ── PDF 파싱 직렬화 ──────────────────────────────────────
+    // DocLib.Instance 는 프로세스 전역 싱글턴이며 thread-safe 하지 않다.
+    // 동시에 여러 스레드가 접근하면 native 포인터가 중복 해제되어 프로세스가 강제 종료된다.
+    // SemaphoreSlim(1,1) 으로 PDF 파싱을 직렬화하여 동시 접근을 차단한다.
+    private static readonly SemaphoreSlim _pdfLock = new(1, 1);
+
     // ── 지원 확장자 집합 ─────────────────────────────────────
     private static readonly HashSet<string> _plainTextExts = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -147,8 +153,11 @@ public sealed class FileParser
 
     private static Task<string> ParsePdfAsync(string filePath, int charLimit)
     {
-        return Task.Run(() =>
+        // Task.Run(async …) 으로 _pdfLock 대기 중에는 스레드풀 스레드를 반환하고,
+        // 락을 얻은 후에만 DocLib.Instance 에 단독 접근한다.
+        return Task.Run(async () =>
         {
+            await _pdfLock.WaitAsync().ConfigureAwait(false);
             try
             {
                 using var lib = DocLib.Instance;
@@ -172,6 +181,10 @@ public sealed class FileParser
             {
                 Debug.WriteLine($"[FileParser/PDF] {Path.GetFileName(filePath)}: {ex.Message}");
                 return string.Empty;
+            }
+            finally
+            {
+                _pdfLock.Release();
             }
         });
     }

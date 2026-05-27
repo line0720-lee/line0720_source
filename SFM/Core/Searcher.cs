@@ -47,9 +47,9 @@ public sealed class Searcher
         {
             try
             {
-                await _db.DbLock.WaitAsync().ConfigureAwait(false);
+                await _db.WriteLock.WaitAsync().ConfigureAwait(false);
                 try { _db.SaveSearchHistory(keyword, query.SearchInContent && !hasChoSeong && !isWildcard); }
-                finally { _db.DbLock.Release(); }
+                finally { _db.WriteLock.Release(); }
             }
             catch { /* 히스토리 저장 실패가 검색 결과에 영향 X */ }
         });
@@ -81,9 +81,9 @@ public sealed class Searcher
             var likePat = BuildWildcardLikePattern(keyword);
             return await Task.Run(() =>
             {
-                _db.DbLock.Wait();
+                _db.ReadLock.Wait();
                 try { return _db.CountSearchFiltered(likePat, null, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore); }
-                finally { _db.DbLock.Release(); }
+                finally { _db.ReadLock.Release(); }
             }).ConfigureAwait(false);
         }
 
@@ -93,9 +93,9 @@ public sealed class Searcher
 
         return await Task.Run(() =>
         {
-            _db.DbLock.Wait();
+            _db.ReadLock.Wait();
             try { return _db.CountSearchFiltered(nameLike, ftsQuery, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore); }
-            finally { _db.DbLock.Release(); }
+            finally { _db.ReadLock.Release(); }
         }).ConfigureAwait(false);
     }
 
@@ -115,9 +115,9 @@ public sealed class Searcher
 
         var nameHits = await Task.Run(() =>
         {
-            _db.DbLock.Wait();
+            _db.ReadLock.Wait();
             try { return _db.SearchByNameFiltered(likePattern, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, query.MaxResults, dbOffset); }
-            finally { _db.DbLock.Release(); }
+            finally { _db.ReadLock.Release(); }
         }).ConfigureAwait(false);
 
         return Sort(
@@ -138,9 +138,9 @@ public sealed class Searcher
         // 이름이 keyword 로 시작하는 파일 (abc → abc%)
         var nameHits = await Task.Run(() =>
         {
-            _db.DbLock.Wait();
+            _db.ReadLock.Wait();
             try { return _db.SearchByNameFiltered($"{EscapeLike(keyword)}%", query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, query.MaxResults, dbOffset); }
-            finally { _db.DbLock.Release(); }
+            finally { _db.ReadLock.Release(); }
         }).ConfigureAwait(false);
 
         var map = new Dictionary<string, SearchResult>(StringComparer.OrdinalIgnoreCase);
@@ -153,9 +153,9 @@ public sealed class Searcher
             var ftsQuery    = KoreanUtil.EscapeFts(keyword);
             var contentHits = await Task.Run(() =>
             {
-                _db.DbLock.Wait();
+                _db.ReadLock.Wait();
                 try { return _db.SearchByContentFiltered(ftsQuery, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, query.MaxResults, dbOffset); }
-                finally { _db.DbLock.Release(); }
+                finally { _db.ReadLock.Release(); }
             }).ConfigureAwait(false);
 
             foreach (var (file, rawSnippet) in contentHits)
@@ -195,9 +195,9 @@ public sealed class Searcher
                                  ChoSeongCandidateMax);
             candidates = await Task.Run(() =>
             {
-                _db.DbLock.Wait();
+                _db.ReadLock.Wait();
                 try { return _db.GetRecentFiles(query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, limit); }
-                finally { _db.DbLock.Release(); }
+                finally { _db.ReadLock.Release(); }
             }).ConfigureAwait(false);
         }
         else
@@ -206,9 +206,9 @@ public sealed class Searcher
             var likePattern = KoreanUtil.ToLikePattern(keyword);
             candidates = await Task.Run(() =>
             {
-                _db.DbLock.Wait();
+                _db.ReadLock.Wait();
                 try { return _db.SearchByNameFiltered(likePattern, query.Extensions, query.MinSize, query.MaxSize, query.ModifiedAfter, query.ModifiedBefore, Math.Min(query.MaxResults * 5, 5_000)); }
-                finally { _db.DbLock.Release(); }
+                finally { _db.ReadLock.Release(); }
             }).ConfigureAwait(false);
         }
 

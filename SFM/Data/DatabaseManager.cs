@@ -7,6 +7,19 @@ namespace SFM.Data;
 /// <summary>
 /// SFM SQLite 데이터베이스 접근 계층.
 /// 경로: %APPDATA%\SFM\sfm_index.db
+///
+/// ── 연결 분리 아키텍처 ─────────────────────────────────────────
+///   _writeConn  Indexer 전용 (INSERT/UPDATE/DELETE/DDL)
+///               WriteLock(1,1) 으로 직렬화
+///
+///   _readConn   Searcher / 통계 전용 (SELECT)
+///               ReadLock(1,1) 으로 직렬화
+///               WAL 스냅샷 격리 → _writeConn 쓰기와 동시 실행 가능
+///
+/// WAL 모드에서 두 연결은 독립적으로 동작한다.
+/// _writeConn 이 FTS5 트랜잭션을 진행 중이어도
+/// _readConn 의 SELECT 는 마지막 커밋된 스냅샷을 즉시 반환한다.
+/// ──────────────────────────────────────────────────────────────
 /// </summary>
 public class DatabaseManager : IDisposable
 {
@@ -16,14 +29,21 @@ public class DatabaseManager : IDisposable
 
     // ── 내부 필드 ────────────────────────────────────────────
     private readonly string _dbPath;
-    private SqliteConnection? _connection;
+    private SqliteConnection? _writeConn;   // 쓰기 전용 연결 (Indexer)
+    private SqliteConnection? _readConn;    // 읽기 전용 연결 (Searcher / Stats)
 
     /// <summary>
-    /// DB 접근 직렬화용 세마포어 (1:1).
-    /// Indexer 쓰기 작업과 Searcher 읽기 작업이 같은 SqliteConnection 을 공유하므로
-    /// 동시 접근 시 내부 상태 오염을 방지하기 위해 모든 DB 호출 전후에 획득/해제한다.
+    /// 쓰기 직렬화 락.
+    /// Indexer 의 모든 INSERT / UPDATE / DELETE 호출 전후에 WaitAsync / Release.
     /// </summary>
-    public readonly SemaphoreSlim DbLock = new(1, 1);
+    public readonly SemaphoreSlim WriteLock = new(1, 1);
+
+    /// <summary>
+    /// 읽기 직렬화 락.
+    /// Searcher / MainForm 의 SELECT 호출 전후에 Wait / Release.
+    /// WriteLock 과 독립적이므로 쓰기 중에도 읽기 진행 가능.
+    /// </summary>
+    public readonly SemaphoreSlim ReadLock = new(1, 1);
 
     private string ConnectionString => $"Data Source={_dbPath}";
 
@@ -58,71 +78,43 @@ public class DatabaseManager : IDisposable
 
     private void OpenAndInit()
     {
-        _connection = new SqliteConnection(ConnectionString);
-        _connection.Open();
-        ApplyPragmas();
+        // ── 쓰기 전용 연결 ─────────────────────────────────────
+        _writeConn = new SqliteConnection(ConnectionString);
+        _writeConn.Open();
+        ApplyWritePragmas();
 
-        // ── 빠른 무결성 검사 (데이터 페이지 손상 조기 감지) ─────
-        using var chk = _connection.CreateCommand();
-        chk.CommandText = "PRAGMA quick_check(1)";
-        var result = chk.ExecuteScalar()?.ToString();
-        if (result != "ok")
-            throw new SqliteException($"DB quick_check 실패: {result}", 11);
+        // 빠른 무결성 검사 (데이터 페이지 손상 조기 감지)
+        using (var chk = _writeConn.CreateCommand())
+        {
+            chk.CommandText = "PRAGMA quick_check(1)";
+            var result = chk.ExecuteScalar()?.ToString();
+            if (result != "ok")
+                throw new SqliteException($"DB quick_check 실패: {result}", 11);
+        }
 
         CreateSchema();
         MigrateToTrigramIfNeeded();   // unicode61 → trigram 자동 마이그레이션
         Exec("PRAGMA optimize");      // 시작 시 쿼리 플래너 통계 갱신
+
+        // ── 읽기 전용 연결 ─────────────────────────────────────
+        // _writeConn 이 WAL 모드를 설정했으므로 _readConn 은 자동으로 WAL 을 사용한다.
+        // 별도 연결이므로 WriteLock 없이 SELECT 를 실행할 수 있다.
+        _readConn = new SqliteConnection(ConnectionString);
+        _readConn.Open();
+        ApplyReadPragmas();
     }
 
-    /// <summary>
-    /// FTS5 테이블이 unicode61 토크나이저를 사용 중이면 trigram으로 재생성한다.
-    /// unicode61 은 한국어를 토큰 단위로 분리하지 못해 부분 검색(예: "가나")이 불가능하다.
-    /// trigram 은 3글자 N-gram으로 색인을 구성하여 임의 부분 문자열 검색을 지원한다.
-    /// 마이그레이션 후 has_content 를 0으로 초기화하면 다음 시작 시
-    /// BuildMissingContentAsync 가 자동으로 내용을 재인덱싱한다.
-    /// </summary>
-    private void MigrateToTrigramIfNeeded()
-    {
-        using var chk = _connection!.CreateCommand();
-        chk.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='file_content'";
-        var ddl = chk.ExecuteScalar()?.ToString() ?? string.Empty;
-
-        // 이미 trigram 이면 마이그레이션 불필요
-        if (ddl.Contains("trigram", StringComparison.OrdinalIgnoreCase)) return;
-
-        // 기존 unicode61 FTS 테이블 삭제 → trigram 으로 재생성
-        Exec("DROP TABLE IF EXISTS file_content");
-        Exec("""
-            CREATE VIRTUAL TABLE file_content USING fts5(
-                file_id  UNINDEXED,
-                content,
-                tokenize = 'trigram'
-            )
-            """);
-
-        // 기존 파일의 has_content 를 0으로 초기화
-        // → 다음 시작 시 BuildMissingContentAsync 가 자동으로 재인덱싱
-        Exec("UPDATE file_index SET has_content = 0");
-    }
-
-    /// <summary>
-    /// 외부에서 강제 복구를 요청할 때 호출. 손상 파일을 백업하고 DB를 재생성한다.
-    /// 검색 중 오류코드 11(CORRUPT) 발생 시 MainForm 에서 호출한다.
-    /// </summary>
+    /// <summary>외부에서 강제 복구 요청 시 호출. 손상 파일 백업 후 재생성.</summary>
     public void RecoverAndReinit()
     {
         RecoverCorruptDatabase();
         OpenAndInit();
     }
 
-    /// <summary>
-    /// 손상된 DB 파일(.db / .db-wal / .db-shm)을 타임스탬프 접미사로 이름을 바꾼다.
-    /// 이름 변경 실패 시 삭제를 시도한다.
-    /// </summary>
     private void RecoverCorruptDatabase()
     {
-        _connection?.Dispose();
-        _connection = null;
+        _writeConn?.Dispose(); _writeConn = null;
+        _readConn?.Dispose();  _readConn  = null;
 
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         foreach (var suffix in (string[])["", "-wal", "-shm"])
@@ -140,16 +132,24 @@ public class DatabaseManager : IDisposable
         }
     }
 
-    private void ApplyPragmas()
+    /// <summary>쓰기 연결용 PRAGMA — WAL · 동기화 · 캐시 · 자동체크포인트.</summary>
+    private void ApplyWritePragmas()
     {
-        // WAL: 읽기/쓰기 병렬, NORMAL: 충분한 내구성, MEMORY: 임시 저장소
         Exec("PRAGMA journal_mode       = WAL");
         Exec("PRAGMA synchronous        = NORMAL");
         Exec("PRAGMA foreign_keys       = ON");
         Exec("PRAGMA temp_store         = MEMORY");
-        Exec("PRAGMA cache_size         = -131072");   // 128 MB 캐시 (음수 = KB 단위) — 대용량 DB 반복 쿼리 가속
-        Exec("PRAGMA mmap_size          = 536870912"); // 512 MB 메모리맵 I/O — 읽기 집약 최적화
-        Exec("PRAGMA wal_autocheckpoint = 4000");      // WAL 4000페이지마다 체크포인트 — 검색 중 I/O 감소
+        Exec("PRAGMA cache_size         = -131072");    // 128 MB 캐시
+        Exec("PRAGMA mmap_size          = 536870912");  // 512 MB 메모리맵 I/O
+        Exec("PRAGMA wal_autocheckpoint = 4000");       // WAL 4000 페이지마다 체크포인트
+    }
+
+    /// <summary>읽기 연결용 PRAGMA — 읽기 캐시만 설정 (WAL 모드는 파일 레벨 공유).</summary>
+    private void ApplyReadPragmas()
+    {
+        ExecRead("PRAGMA cache_size = -65536");     // 64 MB 읽기 캐시
+        ExecRead("PRAGMA mmap_size  = 536870912");  // 512 MB 메모리맵
+        ExecRead("PRAGMA temp_store = MEMORY");
     }
 
     private void CreateSchema()
@@ -174,17 +174,13 @@ public class DatabaseManager : IDisposable
         Exec("CREATE INDEX IF NOT EXISTS idx_fi_extension ON file_index (extension)");
         Exec("CREATE INDEX IF NOT EXISTS idx_fi_modified  ON file_index (modified_at)");
         Exec("CREATE INDEX IF NOT EXISTS idx_fi_content   ON file_index (has_content)");
-        Exec("CREATE INDEX IF NOT EXISTS idx_fi_size      ON file_index (file_size)");  // 크기 범위 필터
+        Exec("CREATE INDEX IF NOT EXISTS idx_fi_size      ON file_index (file_size)");
 
         // ── 복합 인덱스 (필터+정렬 조합 최적화) ─────────────
-        // 확장자 필터 후 최신 수정일 정렬 — SearchByNameFiltered / SearchByContentFiltered
         Exec("CREATE INDEX IF NOT EXISTS idx_fi_ext_mod   ON file_index (extension, modified_at)");
-        // 수정일 범위 + 확장자 복합 필터 — GetRecentFiles / 날짜 기반 필터링
         Exec("CREATE INDEX IF NOT EXISTS idx_fi_mod_ext   ON file_index (modified_at, extension)");
 
         // ── 2. FTS5 전문 검색 가상 테이블 ────────────────────
-        // file_id: UNINDEXED → FTS 색인 제외(숫자 키), content: 전문 색인 대상
-        // trigram: 3글자 N-gram 색인 → 한국어 포함 임의 부분 문자열 검색 지원
         Exec("""
             CREATE VIRTUAL TABLE IF NOT EXISTS file_content USING fts5(
                 file_id  UNINDEXED,
@@ -204,19 +200,39 @@ public class DatabaseManager : IDisposable
             """);
     }
 
+    /// <summary>
+    /// FTS5 테이블이 unicode61 토크나이저를 사용 중이면 trigram 으로 재생성한다.
+    /// </summary>
+    private void MigrateToTrigramIfNeeded()
+    {
+        using var chk = _writeConn!.CreateCommand();
+        chk.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='file_content'";
+        var ddl = chk.ExecuteScalar()?.ToString() ?? string.Empty;
+
+        if (ddl.Contains("trigram", StringComparison.OrdinalIgnoreCase)) return;
+
+        Exec("DROP TABLE IF EXISTS file_content");
+        Exec("""
+            CREATE VIRTUAL TABLE file_content USING fts5(
+                file_id  UNINDEXED,
+                content,
+                tokenize = 'trigram'
+            )
+            """);
+        Exec("UPDATE file_index SET has_content = 0");
+    }
+
     // ─────────────────────────────────────────────────────────
-    // 파일 인덱스 CRUD
+    // 파일 인덱스 CRUD  ── 쓰기 (_writeConn / WriteLock)
     // ─────────────────────────────────────────────────────────
 
     /// <summary>
     /// 파일 메타를 삽입하거나 갱신한다.
     /// ON CONFLICT 시 has_content 는 건드리지 않아 내용 인덱스 상태를 보존한다.
     /// </summary>
-    /// <param name="tx">배치 처리용 외부 트랜잭션. null 이면 자동커밋(기본값).</param>
-    /// <returns>삽입 또는 갱신된 행의 id.</returns>
     public long InsertOrUpdateFile(FileIndex file, SqliteTransaction? tx = null)
     {
-        using var cmd = Cmd("""
+        using var cmd = WriteCmd("""
             INSERT INTO file_index
                 (file_path, file_name, extension, file_size, modified_at, indexed_at, content_hash)
             VALUES
@@ -239,35 +255,30 @@ public class DatabaseManager : IDisposable
         cmd.Parameters.AddWithValue("$indexed",  file.IndexedAt.ToString("O"));
         cmd.Parameters.AddWithValue("$hash",     AsDbValue(file.ContentHash));
 
-        var raw = cmd.ExecuteScalar();
-        return Convert.ToInt64(raw);
+        return Convert.ToInt64(cmd.ExecuteScalar());
     }
 
     /// <summary>
     /// 파일 내용을 FTS5 인덱스에 삽입/갱신하고 has_content = 1 로 표시한다.
     /// FTS5 는 ON CONFLICT 를 지원하지 않으므로 DELETE → INSERT 로 구현한다.
     /// </summary>
-    /// <param name="outerTx">배치 처리용 외부 트랜잭션. null 이면 내부 트랜잭션을 생성한다.</param>
     public void InsertOrUpdateContent(long fileId, string content, SqliteTransaction? outerTx = null)
     {
         bool ownsTx = outerTx is null;
-        var  tx     = ownsTx ? _connection!.BeginTransaction() : outerTx!;
+        var  tx     = ownsTx ? _writeConn!.BeginTransaction() : outerTx!;
 
         try
         {
-            // 기존 항목 삭제 (FTS5 ON CONFLICT 미지원 → DELETE + INSERT)
-            using var del = Cmd("DELETE FROM file_content WHERE file_id = $id", tx);
+            using var del = WriteCmd("DELETE FROM file_content WHERE file_id = $id", tx);
             del.Parameters.AddWithValue("$id", fileId);
             del.ExecuteNonQuery();
 
-            // 새 내용 삽입
-            using var ins = Cmd("INSERT INTO file_content (file_id, content) VALUES ($id, $content)", tx);
+            using var ins = WriteCmd("INSERT INTO file_content (file_id, content) VALUES ($id, $content)", tx);
             ins.Parameters.AddWithValue("$id",      fileId);
             ins.Parameters.AddWithValue("$content", content);
             ins.ExecuteNonQuery();
 
-            // 메타 테이블에 내용 인덱싱 완료 표시
-            using var upd = Cmd("UPDATE file_index SET has_content = 1 WHERE id = $id", tx);
+            using var upd = WriteCmd("UPDATE file_index SET has_content = 1 WHERE id = $id", tx);
             upd.Parameters.AddWithValue("$id", fileId);
             upd.ExecuteNonQuery();
 
@@ -284,62 +295,48 @@ public class DatabaseManager : IDisposable
         }
     }
 
-    /// <summary>
-    /// file_index 및 file_content 에서 해당 파일의 모든 데이터를 삭제한다.
-    /// 경로가 존재하지 않으면 아무 작업도 하지 않는다.
-    /// </summary>
+    /// <summary>file_index 및 file_content 에서 해당 파일의 모든 데이터를 삭제한다.</summary>
     public void DeleteFile(string filePath)
     {
-        using var tx = _connection!.BeginTransaction();
+        using var tx = _writeConn!.BeginTransaction();
         try
         {
-            // id 조회
-            using var sel = Cmd("SELECT id FROM file_index WHERE file_path = $path", tx);
+            using var sel = WriteCmd("SELECT id FROM file_index WHERE file_path = $path", tx);
             sel.Parameters.AddWithValue("$path", filePath);
             var raw = sel.ExecuteScalar();
 
-            if (raw is null)
-            {
-                tx.Rollback();
-                return;
-            }
+            if (raw is null) { tx.Rollback(); return; }
 
             var id = Convert.ToInt64(raw);
 
-            // FTS5 내용 삭제
-            using var delContent = Cmd("DELETE FROM file_content WHERE file_id = $id", tx);
+            using var delContent = WriteCmd("DELETE FROM file_content WHERE file_id = $id", tx);
             delContent.Parameters.AddWithValue("$id", id);
             delContent.ExecuteNonQuery();
 
-            // 메타 삭제
-            using var delIndex = Cmd("DELETE FROM file_index WHERE id = $id", tx);
+            using var delIndex = WriteCmd("DELETE FROM file_index WHERE id = $id", tx);
             delIndex.Parameters.AddWithValue("$id", id);
             delIndex.ExecuteNonQuery();
 
             tx.Commit();
         }
-        catch
-        {
-            tx.Rollback();
-            throw;
-        }
+        catch { tx.Rollback(); throw; }
     }
 
     // ─────────────────────────────────────────────────────────
-    // 경로 조회
+    // 경로 조회 ── 읽기 (_readConn / ReadLock)
     // ─────────────────────────────────────────────────────────
 
     /// <summary>인덱싱된 전체 파일 경로를 반환한다.</summary>
     public List<string> GetAllIndexedPaths()
     {
-        using var cmd = Cmd("SELECT file_path FROM file_index ORDER BY file_path");
+        using var cmd = ReadCmd("SELECT file_path FROM file_index ORDER BY file_path");
         return ReadStrings(cmd);
     }
 
     /// <summary>내용까지 인덱싱된 파일 경로만 반환한다.</summary>
     public List<string> GetContentIndexedPaths()
     {
-        using var cmd = Cmd(
+        using var cmd = ReadCmd(
             "SELECT file_path FROM file_index WHERE has_content = 1 ORDER BY file_path");
         return ReadStrings(cmd);
     }
@@ -348,36 +345,29 @@ public class DatabaseManager : IDisposable
     // 인덱스 관리
     // ─────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// file_content(FTS5) 전체를 삭제하고 has_content 플래그를 0으로 초기화한다.
-    /// file_index(파일명·메타)는 유지된다.
-    /// </summary>
+    /// <summary>file_content(FTS5) 전체를 삭제하고 has_content 플래그를 0 으로 초기화한다.</summary>
     public void ClearContentIndex()
     {
-        using var tx = _connection!.BeginTransaction();
+        using var tx = _writeConn!.BeginTransaction();
         try
         {
-            using var del = Cmd("DELETE FROM file_content", tx);
+            using var del = WriteCmd("DELETE FROM file_content", tx);
             del.ExecuteNonQuery();
 
-            using var upd = Cmd("UPDATE file_index SET has_content = 0", tx);
+            using var upd = WriteCmd("UPDATE file_index SET has_content = 0", tx);
             upd.ExecuteNonQuery();
 
             tx.Commit();
         }
-        catch
-        {
-            tx.Rollback();
-            throw;
-        }
+        catch { tx.Rollback(); throw; }
     }
 
     /// <summary>총 파일 수, 내용 인덱싱 파일 수, DB 파일 크기(MB)를 반환한다.</summary>
     public IndexStats GetIndexStats()
     {
-        using var cmd = Cmd("""
+        using var cmd = ReadCmd("""
             SELECT
-                COUNT(*)                                         AS total,
+                COUNT(*)                                          AS total,
                 SUM(CASE WHEN has_content = 1 THEN 1 ELSE 0 END) AS content_cnt
             FROM file_index
             """);
@@ -385,26 +375,22 @@ public class DatabaseManager : IDisposable
         using var r = cmd.ExecuteReader();
         r.Read();
 
-        int total   = r.IsDBNull(0) ? 0 : (int)r.GetInt64(0);
-        int content = r.IsDBNull(1) ? 0 : (int)r.GetInt64(1);
-        double mb   = new FileInfo(_dbPath) is { Exists: true } fi
-            ? Math.Round(fi.Length / (1024.0 * 1024), 2)
-            : 0;
+        int    total   = r.IsDBNull(0) ? 0 : (int)r.GetInt64(0);
+        int    content = r.IsDBNull(1) ? 0 : (int)r.GetInt64(1);
+        double mb      = new FileInfo(_dbPath) is { Exists: true } fi
+            ? Math.Round(fi.Length / (1024.0 * 1024), 2) : 0;
 
         return new IndexStats(total, content, mb);
     }
 
     // ─────────────────────────────────────────────────────────
-    // 전체 파일 조회 (Indexer.UpdateIndexAsync 전용)
+    // 전체 파일 조회 ── 읽기 (UpdateIndexAsync 전용)
     // ─────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// 인덱싱된 모든 파일의 메타(내용 제외)를 반환한다.
-    /// UpdateIndexAsync 에서 DB 스냅샷과 디스크를 비교하는 데 사용한다.
-    /// </summary>
+    /// <summary>인덱싱된 모든 파일의 메타(내용 제외)를 반환한다.</summary>
     public List<FileIndex> GetAllIndexedFiles()
     {
-        using var cmd = Cmd("""
+        using var cmd = ReadCmd("""
             SELECT id, file_path, file_name, extension, file_size,
                    modified_at, indexed_at, content_hash, has_content
             FROM   file_index
@@ -414,54 +400,41 @@ public class DatabaseManager : IDisposable
     }
 
     // ─────────────────────────────────────────────────────────
-    // 전체 초기화
+    // 전체 초기화 ── 쓰기
     // ─────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// file_index · file_content · search_history 전체를 삭제한다.
-    /// 테이블 구조(스키마)는 유지된다.
-    /// </summary>
+    /// <summary>file_index · file_content · search_history 전체를 삭제한다 (스키마 유지).</summary>
     public void ClearAllIndexes()
     {
-        using var tx = _connection!.BeginTransaction();
+        using var tx = _writeConn!.BeginTransaction();
         try
         {
-            using var d1 = Cmd("DELETE FROM file_content",   tx); d1.ExecuteNonQuery();
-            using var d2 = Cmd("DELETE FROM file_index",     tx); d2.ExecuteNonQuery();
-            using var d3 = Cmd("DELETE FROM search_history", tx); d3.ExecuteNonQuery();
+            using var d1 = WriteCmd("DELETE FROM file_content",   tx); d1.ExecuteNonQuery();
+            using var d2 = WriteCmd("DELETE FROM file_index",     tx); d2.ExecuteNonQuery();
+            using var d3 = WriteCmd("DELETE FROM search_history", tx); d3.ExecuteNonQuery();
             tx.Commit();
         }
-        catch
-        {
-            tx.Rollback();
-            throw;
-        }
+        catch { tx.Rollback(); throw; }
     }
 
-    /// <summary>
-    /// VACUUM 으로 DB 파일을 압축하여 삭제된 데이터 공간을 회수한다.
-    /// 완료 후 PRAGMA optimize 로 쿼리 플래너 통계를 갱신한다.
-    /// </summary>
+    /// <summary>VACUUM 으로 DB 파일을 압축하여 삭제된 데이터 공간을 회수한다.</summary>
     public void Vacuum()
     {
         Exec("VACUUM");
-        Exec("PRAGMA optimize");   // 인덱스 통계 갱신 → 쿼리 플래너 정확도 향상
+        Exec("PRAGMA optimize");
     }
 
-    /// <summary>
-    /// 배치 인덱싱을 위한 트랜잭션을 시작한다.
-    /// 호출자가 <c>Commit()</c> / <c>Rollback()</c> / <c>Dispose()</c>를 책임진다.
-    /// </summary>
-    public SqliteTransaction BeginTransaction() => _connection!.BeginTransaction();
+    /// <summary>배치 인덱싱을 위한 트랜잭션을 시작한다 (쓰기 연결 전용).</summary>
+    public SqliteTransaction BeginTransaction() => _writeConn!.BeginTransaction();
 
     // ─────────────────────────────────────────────────────────
-    // 검색 (Searcher.cs 전용)
+    // 검색 ── 읽기 (_readConn / ReadLock)
     // ─────────────────────────────────────────────────────────
 
     /// <summary>파일명 LIKE 검색. 내용 미검색.</summary>
     public List<FileIndex> SearchByFileName(string keyword, int limit)
     {
-        using var cmd = Cmd("""
+        using var cmd = ReadCmd("""
             SELECT id, file_path, file_name, extension, file_size,
                    modified_at, indexed_at, content_hash, has_content
             FROM   file_index
@@ -474,19 +447,15 @@ public class DatabaseManager : IDisposable
         return ReadFileIndexList(cmd);
     }
 
-    /// <summary>
-    /// FTS5 전문 검색. SQLite snippet() 함수로 발췌문을 함께 반환한다.
-    /// 2자 이하 쿼리는 trigram 인덱스 미지원이므로 LIKE 폴백으로 처리한다.
-    /// </summary>
+    /// <summary>FTS5 전문 검색. 2자 이하 키워드는 LIKE 폴백.</summary>
     public List<(FileIndex File, string Snippet)> SearchByContent(string keyword, int limit)
     {
-        // 2자 이하: trigram 인덱스가 작동하지 않으므로 LIKE 폴백
         if (NeedsFtsLikeFallback(keyword))
             return SearchByContentLike(keyword, [], null, null, null, null, limit, 0);
 
         var ftsQuery = EscapeFts(keyword);
 
-        using var cmd = Cmd("""
+        using var cmd = ReadCmd("""
             SELECT fi.id, fi.file_path, fi.file_name, fi.extension, fi.file_size,
                    fi.modified_at, fi.indexed_at, fi.content_hash, fi.has_content,
                    snippet(file_content, 1, '【', '】', '…', 12) AS snippet
@@ -506,17 +475,11 @@ public class DatabaseManager : IDisposable
             while (r.Read())
                 list.Add((ReadFileIndex(r), r.IsDBNull(9) ? string.Empty : r.GetString(9)));
         }
-        catch (SqliteException)
-        {
-            // FTS 쿼리 문법 오류(특수문자 등) → 빈 목록 반환
-        }
+        catch (SqliteException) { }
         return list;
     }
 
-    /// <summary>
-    /// 파일명 LIKE 검색 + 다중 필터 (확장자·크기·수정일).
-    /// <paramref name="likePattern"/>은 이미 이스케이프된 상태여야 한다.
-    /// </summary>
+    /// <summary>파일명 LIKE 검색 + 다중 필터 (확장자·크기·수정일).</summary>
     public List<FileIndex> SearchByNameFiltered(
         string    likePattern,
         string[]  extensions,
@@ -537,7 +500,7 @@ public class DatabaseManager : IDisposable
         AppendFilters(sb, extensions, minSize, maxSize, after, before);
         sb.Append("\nORDER BY modified_at DESC\nLIMIT $limit OFFSET $offset");
 
-        using var cmd = Cmd(sb.ToString());
+        using var cmd = ReadCmd(sb.ToString());
         cmd.Parameters.AddWithValue("$like",   likePattern);
         AddFilterParams(cmd, extensions, minSize, maxSize, after, before);
         cmd.Parameters.AddWithValue("$limit",  limit);
@@ -545,10 +508,7 @@ public class DatabaseManager : IDisposable
         return ReadFileIndexList(cmd);
     }
 
-    /// <summary>
-    /// FTS5 전문 검색 + 다중 필터. snippet() 함수로 발췌문을 함께 반환한다.
-    /// 2자 이하 쿼리는 trigram 미지원이므로 LIKE 폴백으로 처리한다.
-    /// </summary>
+    /// <summary>FTS5 전문 검색 + 다중 필터. snippet() 함수로 발췌문을 함께 반환한다.</summary>
     public List<(FileIndex File, string Snippet)> SearchByContentFiltered(
         string    ftsQuery,
         string[]  extensions,
@@ -559,7 +519,6 @@ public class DatabaseManager : IDisposable
         int       limit,
         int       offset = 0)
     {
-        // ftsQuery 는 EscapeFts 가 감싼 값이므로 원문을 추출해 길이 확인
         var raw = ftsQuery.Trim('"').Trim();
         if (NeedsFtsLikeFallback(raw))
             return SearchByContentLike(raw, extensions, minSize, maxSize, after, before, limit, offset);
@@ -576,7 +535,7 @@ public class DatabaseManager : IDisposable
         AppendFilters(sb, extensions, minSize, maxSize, after, before, tableAlias: "fi");
         sb.Append("\nORDER BY rank\nLIMIT $limit OFFSET $offset");
 
-        using var cmd = Cmd(sb.ToString());
+        using var cmd = ReadCmd(sb.ToString());
         cmd.Parameters.AddWithValue("$q",      ftsQuery);
         AddFilterParams(cmd, extensions, minSize, maxSize, after, before);
         cmd.Parameters.AddWithValue("$limit",  limit);
@@ -589,17 +548,11 @@ public class DatabaseManager : IDisposable
             while (r.Read())
                 list.Add((ReadFileIndex(r), r.IsDBNull(9) ? string.Empty : r.GetString(9)));
         }
-        catch (SqliteException)
-        {
-            // FTS 쿼리 문법 오류(특수문자 등) → 빈 목록
-        }
+        catch (SqliteException) { }
         return list;
     }
 
-    /// <summary>
-    /// 2자 이하 키워드용 LIKE 폴백 내용 검색.
-    /// file_content 테이블의 content 컬럼에 직접 LIKE '%keyword%' 로 검색한다.
-    /// </summary>
+    /// <summary>2자 이하 키워드용 LIKE 폴백 내용 검색.</summary>
     private List<(FileIndex File, string Snippet)> SearchByContentLike(
         string    keyword,
         string[]  extensions,
@@ -622,7 +575,7 @@ public class DatabaseManager : IDisposable
         AppendFilters(sb, extensions, minSize, maxSize, after, before, tableAlias: "fi");
         sb.Append("\nORDER BY fi.modified_at DESC\nLIMIT $limit OFFSET $offset");
 
-        using var cmd = Cmd(sb.ToString());
+        using var cmd = ReadCmd(sb.ToString());
         cmd.Parameters.AddWithValue("$like", $"%{keyword}%");
         AddFilterParams(cmd, extensions, minSize, maxSize, after, before);
         cmd.Parameters.AddWithValue("$limit",  limit);
@@ -635,36 +588,15 @@ public class DatabaseManager : IDisposable
             while (r.Read())
             {
                 var fullContent = r.IsDBNull(9) ? string.Empty : r.GetString(9);
-                // 스니펫: 키워드 주변 60자 발췌
-                var snippet = ExtractSnippet(fullContent, keyword, 60);
+                var snippet     = ExtractSnippet(fullContent, keyword, 60);
                 list.Add((ReadFileIndex(r), snippet));
             }
         }
-        catch (SqliteException) { /* 오류 시 빈 목록 */ }
+        catch (SqliteException) { }
         return list;
     }
 
-    /// <summary>content 에서 keyword 주변 maxChars 자를 발췌하여 반환한다.</summary>
-    private static string ExtractSnippet(string content, string keyword, int maxChars)
-    {
-        if (string.IsNullOrEmpty(content)) return string.Empty;
-        var idx = content.IndexOf(keyword, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0) return content.Length > maxChars ? content[..maxChars] + "…" : content;
-
-        int start = Math.Max(0, idx - maxChars / 2);
-        int end   = Math.Min(content.Length, start + maxChars + keyword.Length);
-        start     = Math.Max(0, end - maxChars - keyword.Length);
-
-        var snippet = content[start..end].Replace('\n', ' ').Replace('\r', ' ');
-        if (start > 0)         snippet = "…" + snippet;
-        if (end < content.Length) snippet += "…";
-        return snippet;
-    }
-
-    /// <summary>
-    /// 최신 수정 파일을 다중 필터 조건으로 가져온다.
-    /// 순수 초성 검색("ㅎㄱ")에서 C# 후필터용 후보 수집에 사용된다.
-    /// </summary>
+    /// <summary>최신 수정 파일을 다중 필터 조건으로 가져온다 (초성 검색 후보 수집용).</summary>
     public List<FileIndex> GetRecentFiles(
         string[]  extensions,
         long?     minSize,
@@ -684,7 +616,7 @@ public class DatabaseManager : IDisposable
         AppendFilters(sb, extensions, minSize, maxSize, after, before);
         sb.Append("\nORDER BY modified_at DESC\nLIMIT $limit OFFSET $offset");
 
-        using var cmd = Cmd(sb.ToString());
+        using var cmd = ReadCmd(sb.ToString());
         AddFilterParams(cmd, extensions, minSize, maxSize, after, before);
         cmd.Parameters.AddWithValue("$limit",  limit);
         cmd.Parameters.AddWithValue("$offset", offset);
@@ -692,18 +624,13 @@ public class DatabaseManager : IDisposable
     }
 
     // ─────────────────────────────────────────────────────────
-    // 전체 검색 건수 (무한 스크롤용 total count)
+    // 전체 검색 건수 ── 읽기 (무한 스크롤용 total count)
     // ─────────────────────────────────────────────────────────
 
     /// <summary>
     /// 파일명 검색(선택적으로 내용 검색 포함) 조건에 해당하는 고유 파일 수를 반환한다.
     /// 파일명 + 내용을 UNION 으로 결합하여 중복 없는 정확한 건수를 계산한다.
     /// </summary>
-    /// <param name="nameLikePattern">파일명 LIKE 패턴 (이미 이스케이프된 값)</param>
-    /// <param name="ftsQuery">
-    ///   null  → 파일명 검색만 수행.<br/>
-    ///   값 있음 → 파일명 UNION 내용 검색.
-    /// </param>
     public long CountSearchFiltered(
         string    nameLikePattern,
         string?   ftsQuery,
@@ -713,7 +640,6 @@ public class DatabaseManager : IDisposable
         DateTime? after,
         DateTime? before)
     {
-        // ── Sub-query 1: 파일명 검색 ─────────────────────────
         var sbName = new StringBuilder("""
             SELECT file_path
             FROM   file_index
@@ -725,18 +651,15 @@ public class DatabaseManager : IDisposable
 
         if (ftsQuery is null)
         {
-            // 파일명 검색만 → COUNT(*) FROM (sub)
             sql = $"SELECT COUNT(*) FROM ({sbName})";
         }
         else
         {
-            // ── Sub-query 2: 내용 검색 ────────────────────────
             var rawFts = ftsQuery.Trim('"').Trim();
             StringBuilder sbContent;
 
             if (NeedsFtsLikeFallback(rawFts))
             {
-                // 2자 이하 → LIKE 폴백
                 sbContent = new StringBuilder("""
                     SELECT fi.file_path
                     FROM   file_content fc
@@ -746,7 +669,6 @@ public class DatabaseManager : IDisposable
             }
             else
             {
-                // FTS5 MATCH
                 sbContent = new StringBuilder("""
                     SELECT fi.file_path
                     FROM   file_content
@@ -755,13 +677,10 @@ public class DatabaseManager : IDisposable
                     """);
             }
             AppendFilters(sbContent, extensions, minSize, maxSize, after, before, tableAlias: "fi");
-
-            // UNION 으로 두 결과를 합치고 COUNT(DISTINCT …) 효과를 낸다
-            // (UNION 은 기본으로 중복 제거)
             sql = $"SELECT COUNT(*) FROM ({sbName}\nUNION\n{sbContent})";
         }
 
-        using var cmd = Cmd(sql);
+        using var cmd = ReadCmd(sql);
         cmd.Parameters.AddWithValue("$nameLike", nameLikePattern);
         AddFilterParams(cmd, extensions, minSize, maxSize, after, before);
 
@@ -779,20 +698,17 @@ public class DatabaseManager : IDisposable
             var result = cmd.ExecuteScalar();
             return result is null ? 0 : Convert.ToInt64(result);
         }
-        catch (SqliteException)
-        {
-            return 0;   // FTS 문법 오류 등 → 0 반환 (UI 에서 -1로 처리)
-        }
+        catch (SqliteException) { return 0; }
     }
 
     // ─────────────────────────────────────────────────────────
-    // 검색 히스토리
+    // 검색 히스토리 ── 쓰기 (SaveSearchHistory) / 읽기 (GetRecentSearches)
     // ─────────────────────────────────────────────────────────
 
-    /// <summary>검색어를 히스토리에 저장한다.</summary>
+    /// <summary>검색어를 히스토리에 저장한다 (쓰기).</summary>
     public void SaveSearchHistory(string query, bool wasContentSearch)
     {
-        using var cmd = Cmd("""
+        using var cmd = WriteCmd("""
             INSERT INTO search_history (query, was_content_search, searched_at)
             VALUES ($q, $isContent, $at)
             """);
@@ -802,10 +718,10 @@ public class DatabaseManager : IDisposable
         cmd.ExecuteNonQuery();
     }
 
-    /// <summary>중복 제거 후 최근 검색어를 최대 <paramref name="limit"/>개 반환한다.</summary>
+    /// <summary>중복 제거 후 최근 검색어를 최대 <paramref name="limit"/>개 반환한다 (읽기).</summary>
     public List<string> GetRecentSearches(int limit = 20)
     {
-        using var cmd = Cmd("""
+        using var cmd = ReadCmd("""
             SELECT   query
             FROM     search_history
             GROUP BY query
@@ -820,30 +736,42 @@ public class DatabaseManager : IDisposable
     // 내부 헬퍼
     // ─────────────────────────────────────────────────────────
 
-    /// <summary>단일 SQL 문을 파라미터 없이 실행한다.</summary>
+    /// <summary>쓰기 연결로 단일 SQL 문을 실행한다 (파라미터 없음).</summary>
     private void Exec(string sql)
     {
-        using var cmd = _connection!.CreateCommand();
+        using var cmd = _writeConn!.CreateCommand();
         cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
     }
 
-    /// <summary>커맨드 객체를 생성한다.</summary>
-    private SqliteCommand Cmd(string sql, SqliteTransaction? tx = null)
+    /// <summary>읽기 연결로 단일 SQL 문을 실행한다 (파라미터 없음).</summary>
+    private void ExecRead(string sql)
     {
-        var cmd = _connection!.CreateCommand();
+        using var cmd = _readConn!.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>쓰기 연결 커맨드 생성.</summary>
+    private SqliteCommand WriteCmd(string sql, SqliteTransaction? tx = null)
+    {
+        var cmd = _writeConn!.CreateCommand();
         cmd.CommandText = sql;
         if (tx is not null) cmd.Transaction = tx;
+        return cmd;
+    }
+
+    /// <summary>읽기 연결 커맨드 생성.</summary>
+    private SqliteCommand ReadCmd(string sql)
+    {
+        var cmd = _readConn!.CreateCommand();
+        cmd.CommandText = sql;
         return cmd;
     }
 
     /// <summary>null 가능한 값을 DBNull 로 변환한다.</summary>
     private static object AsDbValue(object? value) => value ?? (object)DBNull.Value;
 
-    /// <summary>
-    /// 공통 필터 조건절(AND …)을 SQL StringBuilder 에 추가한다.
-    /// <paramref name="tableAlias"/>가 비어 있지 않으면 "alias.column" 형태로 생성한다.
-    /// </summary>
     private static void AppendFilters(
         StringBuilder sb,
         string[]  extensions,
@@ -857,8 +785,7 @@ public class DatabaseManager : IDisposable
 
         if (extensions is { Length: > 0 })
         {
-            var inList = string.Join(", ",
-                extensions.Select((_, i) => $"$ext{i}"));
+            var inList = string.Join(", ", extensions.Select((_, i) => $"$ext{i}"));
             sb.Append($"\nAND {pfx}extension IN ({inList})");
         }
         if (minSize.HasValue) sb.Append($"\nAND {pfx}file_size   >= $minSize");
@@ -867,7 +794,6 @@ public class DatabaseManager : IDisposable
         if (before.HasValue)  sb.Append($"\nAND {pfx}modified_at <= $before");
     }
 
-    /// <summary>공통 필터 파라미터를 커맨드 오브젝트에 추가한다.</summary>
     private static void AddFilterParams(
         SqliteCommand cmd,
         string[]  extensions,
@@ -886,21 +812,33 @@ public class DatabaseManager : IDisposable
         if (before.HasValue)  cmd.Parameters.AddWithValue("$before",  before.Value.ToString("O"));
     }
 
-    /// <summary>FTS5 MATCH 쿼리에서 특수문자를 이스케이프하여 구문(phrase) 검색으로 만든다.</summary>
+    /// <summary>FTS5 MATCH 쿼리에 사용할 phrase 검색 문자열로 변환한다.</summary>
     private static string EscapeFts(string keyword)
     {
-        // 쌍따옴표를 제거하고 구문 검색으로 감싼다 → "keyword"
         var cleaned = keyword.Replace("\"", " ").Trim();
         return string.IsNullOrEmpty(cleaned) ? "\"\"" : $"\"{cleaned}\"";
     }
 
-    /// <summary>
-    /// trigram 토크나이저는 3자 미만 쿼리를 처리하지 못하므로,
-    /// 2자 이하 쿼리(주로 한국어)는 content 컬럼에 LIKE 검색으로 폴백한다.
-    /// </summary>
-    private bool NeedsFtsLikeFallback(string keyword) => keyword.Length < 3;
+    /// <summary>trigram 은 3자 미만 쿼리를 처리하지 못하므로 LIKE 폴백이 필요하면 true.</summary>
+    private static bool NeedsFtsLikeFallback(string keyword) => keyword.Length < 3;
 
-    private List<string> ReadStrings(SqliteCommand cmd)
+    private static string ExtractSnippet(string content, string keyword, int maxChars)
+    {
+        if (string.IsNullOrEmpty(content)) return string.Empty;
+        var idx = content.IndexOf(keyword, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return content.Length > maxChars ? content[..maxChars] + "…" : content;
+
+        int start = Math.Max(0, idx - maxChars / 2);
+        int end   = Math.Min(content.Length, start + maxChars + keyword.Length);
+        start     = Math.Max(0, end - maxChars - keyword.Length);
+
+        var snippet = content[start..end].Replace('\n', ' ').Replace('\r', ' ');
+        if (start > 0)            snippet = "…" + snippet;
+        if (end < content.Length) snippet += "…";
+        return snippet;
+    }
+
+    private static List<string> ReadStrings(SqliteCommand cmd)
     {
         using var r  = cmd.ExecuteReader();
         var list = new List<string>();
@@ -908,7 +846,7 @@ public class DatabaseManager : IDisposable
         return list;
     }
 
-    private List<FileIndex> ReadFileIndexList(SqliteCommand cmd)
+    private static List<FileIndex> ReadFileIndexList(SqliteCommand cmd)
     {
         using var r  = cmd.ExecuteReader();
         var list = new List<FileIndex>();
@@ -940,18 +878,10 @@ public class DatabaseManager : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            // Close() 를 먼저 명시적으로 호출하여 미완료 트랜잭션·리더를 정리한다.
-            // Microsoft.Data.Sqlite 일부 버전에서 Close() 없이 Dispose() 하면
-            // 내부 NullReferenceException 이 발생할 수 있다.
-            _connection?.Close();
-            _connection?.Dispose();
-        }
-        catch { /* 이미 닫혔거나 내부 오류 → 무시 */ }
-
-        try { DbLock.Dispose(); } catch { }
-
+        try { _writeConn?.Close(); _writeConn?.Dispose(); } catch { }
+        try { _readConn?.Close();  _readConn?.Dispose();  } catch { }
+        try { WriteLock.Dispose(); } catch { }
+        try { ReadLock.Dispose();  } catch { }
         GC.SuppressFinalize(this);
     }
 }
