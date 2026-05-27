@@ -18,7 +18,7 @@ public class AppSettings
     public string[] IndexRootPaths { get; set; } = [];
 
     /// <summary>true: 파일 내용까지 인덱싱 (DB 용량 증가) / false: 파일명·메타만</summary>
-    public bool EnableContentIndexing { get; set; } = true;
+    public bool EnableContentIndexing { get; set; } = false;
 
     /// <summary>인덱싱에서 제외할 경로 목록 (접두사 일치)</summary>
     public string[] ExcludedPaths { get; set; } = [];
@@ -116,7 +116,7 @@ public class AppSettings
         MaxSearchResults     = 500;
 
         IndexRootPaths         = [];
-        EnableContentIndexing  = true;
+        EnableContentIndexing  = false;
         ContentIndexExtensions = [];
         ExcludedPaths          = [];
         MaxFileSizeMB          = 50;

@@ -1743,6 +1743,18 @@ public partial class MainForm : Form
         _settings.EnableContentIndexing = false;
         _settings.Save();
 
+        // 내용 검색 UI 강제 비활성화 — 기존 settings.json 에 EnableContentIndexing=true 가
+        // 저장된 상태로 앱이 뜨면 생성자에서 chkContent.Enabled=true 가 될 수 있으므로,
+        // 인덱싱을 새로 시작할 때는 반드시 UI 도 함께 초기화한다.
+        chkContent.Enabled         = false;
+        tsmiSearchContent.Enabled  = false;
+        chkContent.Checked         = false;
+        tsmiSearchContent.Checked  = false;
+        // 글자색 회색으로 (비활성 상태 시각적 표시)
+        chkContent.ForeColor = _settings.IsDarkMode
+            ? Color.FromArgb(85, 85, 110)
+            : Color.FromArgb(160, 160, 170);
+
         _firstRunCompleted = false;   // 새 빌드 시작 → 완료 차단 플래그 초기화
 
         // BuildIndexAsync 실행 중에는 FileWatcher 완전 중지.
