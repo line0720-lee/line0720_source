@@ -458,8 +458,12 @@ public partial class MainForm : Form
         };
 
         // ── 창 크기 변경 / 스플리터 이동 → 열 너비 자동 재조정 ─────
+        // IsHandleCreated 가드 필수:
+        // RestoreWindowBounds()가 생성자에서 폼 크기를 바꾸면 SizeChanged 가 발생하는데,
+        // 이 시점(Application.Run 이전)에는 핸들이 아직 없어 BeginInvoke 가 예외를 던진다.
         SizeChanged += (_, _) =>
         {
+            if (!IsHandleCreated) return;
             if (tsmiViewAutoCol.Checked) BeginInvoke(AutoResizeColumns);
         };
         splitPreview.SplitterMoved += (_, _) =>

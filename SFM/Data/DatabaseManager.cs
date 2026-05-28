@@ -878,10 +878,14 @@ public class DatabaseManager : IDisposable
 
     public void Dispose()
     {
-        try { _writeConn?.Close(); _writeConn?.Dispose(); } catch { }
-        try { _readConn?.Close();  _readConn?.Dispose();  } catch { }
-        try { WriteLock.Dispose(); } catch { }
-        try { ReadLock.Dispose();  } catch { }
+        // Close() 와 Dispose() 를 별도 try-catch 로 분리:
+        // Close() 에서 내부 NullRef 가 발생해도 Dispose() 가 반드시 호출되도록 보장한다.
+        try { _writeConn?.Close();   } catch { }
+        try { _writeConn?.Dispose(); } catch { }
+        try { _readConn?.Close();    } catch { }
+        try { _readConn?.Dispose();  } catch { }
+        try { WriteLock.Dispose();   } catch { }
+        try { ReadLock.Dispose();    } catch { }
         GC.SuppressFinalize(this);
     }
 }
