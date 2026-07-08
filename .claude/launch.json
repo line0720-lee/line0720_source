@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ai-guide",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "3001", "--directory", "ai-guide"],
+      "port": 3001
+    },
+    {
+      "name": "IT_Error",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "3002", "--directory", "IT_Error"],
+      "port": 3002
+    }
+  ]
+}
