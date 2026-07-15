@@ -1,17 +1,23 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import httpx
 import json
 import io
 import re
 import os
+import uuid
 
 import fitz  # PyMuPDF
 
 # ── 자동 로딩 대상 폴더 ──────────────────────────────────
-DATA_DIR = r"C:\Claude(바이브코딩)\Study\IT_Error\Data"
+DATA_DIR   = r"C:\Claude(바이브코딩)\Study\IT_Error\Data"
+IMAGES_DIR = os.path.join(DATA_DIR, "images")
+os.makedirs(IMAGES_DIR, exist_ok=True)
+
+ALLOWED_IMG_EXTS = {"png", "jpg", "jpeg", "gif", "webp"}
 
 TEXT_EXTS_BE = {
     'txt','log','csv','tsv','json','jsonl','md','markdown',
@@ -43,6 +49,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 
 # ── 공유 게이트웨이 주소 (모든 모델 호출은 이 변수만 사용) ──────────────
 GATEWAY      = "http://121.138.151.6:11500"
@@ -80,6 +88,7 @@ class QnaItem(BaseModel):
     section: str
     question: str
     answer_lines: list[str]
+    images: list[str] = []
 
 class SaveQnaRequest(BaseModel):
     items: list[QnaItem]
@@ -173,12 +182,23 @@ def _parse_qna_paragraphs(paragraphs) -> list[dict]:
 
     def flush():
         if q_num and a_lines:
+            images, clean_lines = [], []
+            for l in a_lines:
+                m = re.match(r'^\[IMG:(.+)\]$', l)
+                if m:
+                    images.append(m.group(1))
+                else:
+                    clean_lines.append(l)
+            text = f"Q{q_num}. {q_text}\n" + "\n".join(f"- {l}" for l in clean_lines)
+            if images:
+                text += f"\n(첨부 이미지 {len(images)}장)"
             items.append({
                 "id":           f"Q{q_num}",
                 "section":      section,
                 "question":     q_text,
-                "answer_lines": list(a_lines),
-                "text":         f"Q{q_num}. {q_text}\n" + "\n".join(f"- {l}" for l in a_lines),
+                "answer_lines": clean_lines,
+                "images":       images,
+                "text":         text,
             })
 
     for para in paragraphs:
@@ -299,9 +319,10 @@ async def save_qna(req: SaveQnaRequest):
                 cur_sec = item.section
                 doc.add_paragraph(cur_sec)
             doc.add_paragraph(f"Q{q_num}. {item.question}")
-            if item.answer_lines:
-                doc.add_paragraph(f"A.  - {item.answer_lines[0]}")
-                for line in item.answer_lines[1:]:
+            full_lines = list(item.answer_lines) + [f"[IMG:{img}]" for img in item.images]
+            if full_lines:
+                doc.add_paragraph(f"A.  - {full_lines[0]}")
+                for line in full_lines[1:]:
                     doc.add_paragraph(f"     - {line}")
             q_num += 1
 
@@ -309,6 +330,19 @@ async def save_qna(req: SaveQnaRequest):
         return {"ok": True, "saved": os.path.basename(path), "count": len(item_list)}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    """대응방법 첨부 이미지 업로드 → Data/images 폴더에 저장."""
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    if ext not in ALLOWED_IMG_EXTS:
+        return JSONResponse(status_code=400, content={"error": "지원하지 않는 이미지 형식입니다. (png/jpg/jpeg/gif/webp)"})
+    safe_name = f"{uuid.uuid4().hex}.{ext}"
+    data = await file.read()
+    with open(os.path.join(IMAGES_DIR, safe_name), "wb") as f:
+        f.write(data)
+    return {"filename": safe_name, "url": f"/images/{safe_name}"}
 
 
 @app.get("/health")

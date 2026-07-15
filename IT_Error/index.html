@@ -414,6 +414,32 @@
     .ua-q    { font-size: .88rem; color: var(--text); line-height: 1.5; }
     .ua-del  { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 1rem; padding: 2px 4px; flex-shrink: 0; }
     .ua-del:hover { color: #EF4444; }
+
+    /* ── 첨부 이미지 (편집 폼) ─────────────────── */
+    .img-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+    .img-thumb { position: relative; width: 72px; height: 72px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); flex-shrink: 0; }
+    .img-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .img-thumb-del {
+      position: absolute; top: 2px; right: 2px; width: 18px; height: 18px;
+      border-radius: 50%; border: none; background: rgba(0,0,0,.65); color: #fff;
+      font-size: .65rem; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    }
+    .img-upload-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      border: 1px dashed var(--border); border-radius: 8px;
+      padding: 6px 12px; font-size: .78rem; color: var(--muted);
+      cursor: pointer; width: fit-content;
+    }
+    .img-upload-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .img-upload-btn input { display: none; }
+
+    /* ── 첨부 이미지 (Q&A 카드 보기) ───────────── */
+    .qna-img-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .qna-thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; }
+
+    /* ── 첨부 이미지 (챗봇 답변) ───────────────── */
+    .cited-img-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .cited-img { max-width: 160px; max-height: 160px; border-radius: 10px; border: 1px solid var(--border); cursor: pointer; box-shadow: var(--bot-shadow); }
   </style>
 </head>
 <body>
@@ -555,7 +581,7 @@ function appendMsg(role, html) {
   } else if (role === 'bot') {
     div.innerHTML = `
       <div class="avatar bot">🤖</div>
-      <div style="min-width:0;flex:1">
+      <div style="min-width:0;flex:1" id="${id}-wrap">
         <div class="bubble" id="${id}-b">${html}</div>
         <div class="ret-wrap" id="${id}-ret" style="display:none"></div>
       </div>`;
@@ -589,6 +615,43 @@ function showRetrieval(id, hits) {
   wrap.innerHTML = `
     <button class="ret-btn" onclick="toggleRet('${id}')">📎 참고 구간 ${hits.length}건 ▾</button>
     <div class="ret-panel" id="${id}-rp">${rows}</div>`;
+}
+
+/* 답변에 인용된 [Qn]의 첨부 이미지 추출 */
+function extractCitedImages(raw, hits) {
+  const cited = new Set([...raw.matchAll(/\[(Q\d+)\]/g)].map(m => m[1]));
+  const imgs = [], seen = new Set();
+  for (const h of hits) {
+    if (h.chunk.isQna && cited.has(h.chunk.qId) && h.chunk.images && h.chunk.images.length) {
+      for (const fn of h.chunk.images) {
+        if (!seen.has(fn)) { seen.add(fn); imgs.push(fn); }
+      }
+    }
+  }
+  return imgs;
+}
+
+function showCitedImages(id, filenames) {
+  const wrap = document.getElementById(id + '-wrap');
+  if (!wrap || !filenames.length) return;
+  const row = document.createElement('div');
+  row.className = 'cited-img-row';
+  row.innerHTML = filenames.map(fn =>
+    `<img src="${BE}/images/${encodeURIComponent(fn)}" class="cited-img" onclick="window.open('${BE}/images/${encodeURIComponent(fn)}','_blank')" alt="참고 이미지"/>`
+  ).join('');
+  wrap.appendChild(row);
+}
+
+/* 이미지 업로드 */
+async function uploadImage(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(BE + '/api/upload-image', { method: 'POST', body: fd });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `업로드 실패 ${res.status}`);
+  }
+  return await res.json();
 }
 
 function toggleRet(id) {
@@ -696,6 +759,7 @@ async function autoLoadData() {
           file: f.filename, startLine: it.id, endLine: it.id,
           text: it.text, display: it.text,
           qId: it.id, section: it.section, isQna: true,
+          images: it.images || [],
         });
       }
     } else if (f.type === 'pdf') {
@@ -826,6 +890,7 @@ async function sendChat() {
     }
     if (first) updateBubble(botId, '(응답 없음)');
     showRetrieval(botId, hits);
+    showCitedImages(botId, extractCitedImages(raw, hits));
     // 미답변 감지 — "확인되지 않습니다" 포함 시 키워드 저장
     if (raw.includes('확인되지 않습니다')) {
       saveUnanswered(question);
@@ -843,8 +908,44 @@ async function sendChat() {
    Q&A 문서 편집기
 ════════════════════════════════════════════ */
 let editorItems = [];   // 편집 중인 Q&A 배열 (객체 참조)
+let formImagesMap = {}; // 편집 폼별 첨부 이미지 임시 저장 { containerId: [filename,...] }
 
 const ROMAN = ['Ⅰ','Ⅱ','Ⅲ','Ⅳ','Ⅴ','Ⅵ','Ⅶ','Ⅷ','Ⅸ','Ⅹ'];
+
+function renderImgList(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const images = formImagesMap[containerId] || [];
+  if (!images.length) {
+    el.innerHTML = '<span class="form-hint">첨부된 이미지가 없습니다.</span>';
+    return;
+  }
+  el.innerHTML = images.map((fn, i) => `
+    <div class="img-thumb">
+      <img src="${BE}/images/${encodeURIComponent(fn)}" alt="첨부 이미지"/>
+      <button type="button" class="img-thumb-del" onclick="removeFormImage('${containerId}', ${i})">✕</button>
+    </div>`).join('');
+}
+
+function removeFormImage(containerId, idx) {
+  formImagesMap[containerId].splice(idx, 1);
+  renderImgList(containerId);
+}
+
+async function handleImgInput(containerId, inputEl) {
+  const files = Array.from(inputEl.files || []);
+  inputEl.value = '';
+  formImagesMap[containerId] = formImagesMap[containerId] || [];
+  for (const file of files) {
+    try {
+      const { filename } = await uploadImage(file);
+      formImagesMap[containerId].push(filename);
+    } catch(err) {
+      alert('이미지 업로드 실패: ' + err.message);
+    }
+  }
+  renderImgList(containerId);
+}
 
 let SECTIONS = [
   "Ⅰ. PC·단말기 관련",
@@ -922,6 +1023,9 @@ function renderEditor() {
         </div>
         <div class="qna-card-body">
           ${(it.answer_lines||[]).map(l => `<div class="ab">${escHtml(l)}</div>`).join('')}
+          ${(it.images && it.images.length) ? `<div class="qna-img-row">${it.images.map(fn =>
+            `<img src="${BE}/images/${encodeURIComponent(fn)}" class="qna-thumb" onclick="window.open('${BE}/images/${encodeURIComponent(fn)}','_blank')" alt="첨부 이미지"/>`
+          ).join('')}</div>` : ''}
         </div>`;
       grp.appendChild(card);
       q++;
@@ -938,6 +1042,9 @@ function startEdit(key) {
 
   const card = document.getElementById('card-' + key);
   if (!card) return;
+
+  const imgListId = `img-list-${key}`;
+  formImagesMap[imgListId] = [...(it.images || [])];
 
   card.innerHTML = `
     <div class="edit-form">
@@ -956,20 +1063,37 @@ function startEdit(key) {
         <textarea class="form-textarea" id="ef-a-${key}" placeholder="각 줄이 하나의 항목이 됩니다.">${(it.answer_lines||[]).map(l=>escHtml(l)).join('\n')}</textarea>
         <span class="form-hint">줄바꿈(Enter)으로 항목을 구분하세요.</span>
       </div>
+      <div class="form-row">
+        <label class="form-label">첨부 이미지</label>
+        <div class="img-list" id="${imgListId}"></div>
+        <label class="img-upload-btn">
+          📷 이미지 추가
+          <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple onchange="handleImgInput('${imgListId}', this)" />
+        </label>
+      </div>
       <div class="form-btns">
-        <button class="btn btn-ghost" onclick="renderEditor()">취소</button>
+        <button class="btn btn-ghost" onclick="cancelEditForm('${imgListId}')">취소</button>
         <button class="btn btn-primary" onclick="applyEdit(${key})">저장</button>
       </div>
     </div>`;
+  renderImgList(imgListId);
+}
+
+function cancelEditForm(imgListId) {
+  delete formImagesMap[imgListId];
+  renderEditor();
 }
 
 function applyEdit(key) {
   const it = editorItems.find(x => x._key === key);
   if (!it) return;
+  const imgListId = `img-list-${key}`;
   it.section      = document.getElementById('ef-sec-' + key).value;
   it.question     = document.getElementById('ef-q-'   + key).value.trim();
   it.answer_lines = document.getElementById('ef-a-'   + key).value
     .split('\n').map(l => l.trim()).filter(Boolean);
+  it.images       = [...(formImagesMap[imgListId] || [])];
+  delete formImagesMap[imgListId];
   renderEditor();
 }
 
@@ -1024,6 +1148,9 @@ function showAddForm(preSection) {
   const body = document.getElementById('editorBody');
   if (document.getElementById('new-form')) document.getElementById('new-form').remove();
 
+  const imgListId = 'img-list-new';
+  formImagesMap[imgListId] = [];
+
   const form = document.createElement('div');
   form.className = 'edit-form';
   form.id = 'new-form';
@@ -1044,13 +1171,29 @@ function showAddForm(preSection) {
       <textarea class="form-textarea" id="nf-a" placeholder="각 줄이 하나의 대응 항목이 됩니다."></textarea>
       <span class="form-hint">줄바꿈(Enter)으로 항목을 구분하세요.</span>
     </div>
+    <div class="form-row">
+      <label class="form-label">첨부 이미지</label>
+      <div class="img-list" id="${imgListId}"></div>
+      <label class="img-upload-btn">
+        📷 이미지 추가
+        <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple onchange="handleImgInput('${imgListId}', this)" />
+      </label>
+    </div>
     <div class="form-btns">
-      <button class="btn btn-ghost" onclick="document.getElementById('new-form').remove()">취소</button>
+      <button class="btn btn-ghost" onclick="cancelAddForm()">취소</button>
       <button class="btn btn-primary" onclick="applyAdd()">추가</button>
     </div>`;
 
   body.insertBefore(form, body.firstChild);
+  body.scrollTop = 0;
+  renderImgList(imgListId);
   document.getElementById('nf-q').focus();
+}
+
+function cancelAddForm() {
+  delete formImagesMap['img-list-new'];
+  const form = document.getElementById('new-form');
+  if (form) form.remove();
 }
 
 function applyAdd() {
@@ -1062,7 +1205,9 @@ function applyAdd() {
   if (!q) { alert('질문을 입력해 주세요.'); return; }
   if (!a.length) { alert('대응 방법을 입력해 주세요.'); return; }
 
-  editorItems.push({ section: sec, question: q, answer_lines: a, _key: Date.now() });
+  const images = [...(formImagesMap['img-list-new'] || [])];
+  delete formImagesMap['img-list-new'];
+  editorItems.push({ section: sec, question: q, answer_lines: a, images, _key: Date.now() });
   renderEditor();
 }
 
@@ -1078,8 +1223,8 @@ async function saveAll() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        items: editorItems.map(({ section, question, answer_lines }) =>
-          ({ section, question, answer_lines }))
+        items: editorItems.map(({ section, question, answer_lines, images }) =>
+          ({ section, question, answer_lines, images: images || [] }))
       }),
     });
     if (!res.ok) throw new Error('서버 오류 ' + res.status);
