@@ -159,7 +159,7 @@
       font-size: .85rem; flex-shrink: 0; margin-top: 2px;
     }
     .avatar.bot  { background: #DBEAFE; }
-    .avatar.user { background: var(--accent); }
+    .avatar.user { background: #E0E7FF; color: var(--accent); }
 
     .bubble {
       padding: 10px 14px;
@@ -396,6 +396,24 @@
       background: #DBEAFE; color: #1D4ED8;
       border-radius: 10px; padding: 1px 7px; font-size: .7rem; font-weight: 700;
     }
+    .badge-red {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: #FEE2E2; color: #DC2626;
+      border-radius: 10px; padding: 1px 6px; font-size: .68rem; font-weight: 700;
+      margin-left: 4px;
+    }
+
+    /* ── 미답변 목록 ───────────────────────── */
+    .ua-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 14px; border: 1px solid var(--border);
+      border-radius: 8px; background: var(--surface);
+    }
+    .ua-meta { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+    .ua-time { font-size: .7rem; color: var(--muted); }
+    .ua-q    { font-size: .88rem; color: var(--text); line-height: 1.5; }
+    .ua-del  { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 1rem; padding: 2px 4px; flex-shrink: 0; }
+    .ua-del:hover { color: #EF4444; }
   </style>
 </head>
 <body>
@@ -413,6 +431,7 @@
     </div>
   </div>
   <div style="display:flex;align-items:center;gap:8px;">
+    <button class="edit-btn" onclick="openUnansweredModal()" id="unansweredBtn">❓ 미답변<span class="badge-red" id="unansweredBadge" style="display:none">0</span></button>
     <button class="edit-btn" onclick="openEditor()">📝 문서 관리</button>
     <div class="status">
       <div class="dot checking" id="dot"></div>
@@ -448,6 +467,23 @@
       <button class="btn btn-primary" id="saveAllBtn" onclick="saveAll()" style="background:#16A34A;color:#fff">
         💾 저장 및 재색인
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 미답변 키워드 모달 ── -->
+<div class="modal-overlay" id="unansweredOverlay">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-header">
+      <div class="modal-title">❓ 미답변 키워드 목록 <span class="badge-cnt" id="unansweredCount">0</span></div>
+      <button class="modal-close" onclick="closeUnansweredModal()">✕</button>
+    </div>
+    <div class="modal-body" id="unansweredBody" style="gap:8px">
+      <div style="text-align:center;padding:40px;color:var(--muted)">미답변 항목이 없습니다.</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" onclick="clearAllUnanswered()" style="margin-right:auto">🗑️ 전체 삭제</button>
+      <button class="btn btn-ghost" onclick="closeUnansweredModal()">닫기</button>
     </div>
   </div>
 </div>
@@ -790,6 +826,11 @@ async function sendChat() {
     }
     if (first) updateBubble(botId, '(응답 없음)');
     showRetrieval(botId, hits);
+    // 미답변 감지 — "확인되지 않습니다" 포함 시 키워드 저장
+    if (raw.includes('확인되지 않습니다')) {
+      saveUnanswered(question);
+      appendMsg('system', `📋 미답변 키워드 저장됨: "${escHtml(question)}"`);
+    }
   } catch(err) {
     updateBubble(botId, `⚠️ 오류: ${escHtml(err.message)}`);
   } finally {
@@ -1057,8 +1098,76 @@ async function saveAll() {
 }
 
 /* ════════════════════════════════════════════
+   미답변 키워드 관리
+════════════════════════════════════════════ */
+let unansweredList = JSON.parse(localStorage.getItem('it_unanswered') || '[]');
+
+function saveUnanswered(question) {
+  unansweredList.unshift({
+    q: question,
+    time: new Date().toLocaleString('ko-KR', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
+  });
+  localStorage.setItem('it_unanswered', JSON.stringify(unansweredList));
+  updateUnansweredBadge();
+}
+
+function updateUnansweredBadge() {
+  const badge = document.getElementById('unansweredBadge');
+  if (!badge) return;
+  if (unansweredList.length > 0) {
+    badge.textContent = unansweredList.length;
+    badge.style.display = 'inline-flex';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function openUnansweredModal() {
+  renderUnansweredBody();
+  document.getElementById('unansweredOverlay').classList.add('open');
+}
+
+function closeUnansweredModal() {
+  document.getElementById('unansweredOverlay').classList.remove('open');
+}
+
+function renderUnansweredBody() {
+  const body = document.getElementById('unansweredBody');
+  const count = document.getElementById('unansweredCount');
+  count.textContent = unansweredList.length;
+  if (!unansweredList.length) {
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">미답변 항목이 없습니다.</div>';
+    return;
+  }
+  body.innerHTML = unansweredList.map((it, i) => `
+    <div class="ua-item">
+      <div class="ua-meta">
+        <span class="ua-time">${escHtml(it.time)}</span>
+        <span class="ua-q">${escHtml(it.q)}</span>
+      </div>
+      <button class="ua-del" onclick="deleteUnanswered(${i})" title="삭제">✕</button>
+    </div>`).join('');
+}
+
+function deleteUnanswered(idx) {
+  unansweredList.splice(idx, 1);
+  localStorage.setItem('it_unanswered', JSON.stringify(unansweredList));
+  updateUnansweredBadge();
+  renderUnansweredBody();
+}
+
+function clearAllUnanswered() {
+  if (!confirm('미답변 목록을 전체 삭제하시겠습니까?')) return;
+  unansweredList = [];
+  localStorage.setItem('it_unanswered', JSON.stringify(unansweredList));
+  updateUnansweredBadge();
+  renderUnansweredBody();
+}
+
+/* ════════════════════════════════════════════
    페이지 로드 시 자동 데이터 로딩
 ════════════════════════════════════════════ */
+updateUnansweredBadge();
 autoLoadData();
 </script>
 </body>
