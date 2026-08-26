@@ -26,6 +26,11 @@ def seed(db_path=DEFAULT_DB_PATH):
         )
     conn.commit()
 
+    already_seeded = conn.execute("SELECT 1 FROM categories LIMIT 1").fetchone() is not None
+    if already_seeded:
+        conn.close()
+        return
+
     owner = conn.execute("SELECT id FROM users WHERE emp_no = 'E001'").fetchone()
     categories = [
         ("일반 업무", "부서 공통 업무", owner["id"]),
