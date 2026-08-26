@@ -87,3 +87,20 @@ def test_list_tasks_only_shows_visible_tasks(client):
     resp = client.get("/api/tasks")
     titles = [t["title"] for t in resp.get_json()]
     assert "내 업무" not in titles
+
+
+def test_delete_task_with_share_succeeds_without_500(client):
+    me = _register_and_login(client, "T012")
+    created = client.post("/api/tasks", json={"title": "공유된 업무", "assignee_id": me["id"]}).get_json()
+
+    client.post("/api/logout")
+    other = _register_and_login(client, "T013")
+
+    client.post("/api/logout")
+    _register_and_login(client, "T012", password="pw1234")
+    share_resp = client.post(f"/api/tasks/{created['id']}/shares", json={"user_id": other["id"]})
+    assert share_resp.status_code == 201
+
+    resp = client.delete(f"/api/tasks/{created['id']}")
+    assert resp.status_code == 200
+    assert "error" not in (resp.get_json() or {})

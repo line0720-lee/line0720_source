@@ -50,3 +50,37 @@ def test_only_owner_can_delete_category(client):
     _register_and_login(client, "E206")
     resp = client.delete(f"/api/categories/{created['id']}")
     assert resp.status_code == 403
+
+
+def test_delete_category_with_share_and_task_cascades_without_500(client):
+    _register_and_login(client, "E207")
+    created = client.post("/api/categories", json={"name": "연쇄삭제대상", "description": ""}).get_json()
+    me = client.get("/api/me").get_json()
+
+    client.post("/api/logout")
+    _register_and_login(client, "E208")
+    other = client.get("/api/me").get_json()
+
+    client.post("/api/logout")
+    _register_and_login(client, "E207", password="pw1234")
+
+    share_resp = client.post(f"/api/categories/{created['id']}/shares", json={"user_id": other["id"]})
+    assert share_resp.status_code == 201
+
+    task = client.post(
+        "/api/tasks",
+        json={"title": "연쇄삭제업무", "assignee_id": me["id"], "category_id": created["id"]},
+    ).get_json()
+
+    resp = client.delete(f"/api/categories/{created['id']}")
+    assert resp.status_code == 200
+    assert "error" not in (resp.get_json() or {})
+
+    # Category itself is gone from the owner's list
+    resp = client.get("/api/categories")
+    ids = [c["id"] for c in resp.get_json()]
+    assert created["id"] not in ids
+
+    # Linked task was cascaded away (not left dangling)
+    resp = client.get(f"/api/tasks/{task['id']}")
+    assert resp.status_code == 404

@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS categories (
 );
 
 CREATE TABLE IF NOT EXISTS category_shares (
-  category_id INTEGER NOT NULL REFERENCES categories(id),
+  category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
   user_id INTEGER NOT NULL REFERENCES users(id),
   PRIMARY KEY (category_id, user_id)
 );
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,
   content TEXT,
-  category_id INTEGER REFERENCES categories(id),
+  category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
   assignee_id INTEGER NOT NULL REFERENCES users(id),
   start_date TEXT,
   end_date TEXT,
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 CREATE TABLE IF NOT EXISTS task_shares (
-  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   user_id INTEGER NOT NULL REFERENCES users(id),
   PRIMARY KEY (task_id, user_id)
 );
