@@ -12,6 +12,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "3002", "--directory", "IT_Error"],
       "port": 3002
+    },
+    {
+      "name": "task-share-manager",
+      "runtimeExecutable": "task-share-manager/venv/Scripts/python.exe",
+      "runtimeArgs": ["task-share-manager/app.py"],
+      "port": 5050
     }
   ]
 }

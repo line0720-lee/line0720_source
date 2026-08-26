@@ -44,7 +44,7 @@ function renderTasks(tasks) {
   list.innerHTML = "";
   tasks.forEach((t) => {
     const col = document.createElement("div");
-    col.className = "col-md-4";
+    col.className = "col-12";
     col.innerHTML = `
       <div class="card status-${t.status}">
         <div class="card-body">
@@ -93,6 +93,7 @@ async function changeStatus(taskId, status) {
   });
   loadTasks();
   loadStatusSummary();
+  loadCalendar();
 }
 
 async function openTaskModal(taskId) {
@@ -139,6 +140,7 @@ async function submitTaskForm(e) {
     taskModal.hide();
     loadTasks();
     loadStatusSummary();
+    loadCalendar();
   } else {
     const data = await resp.json();
     const errBox = document.getElementById("task-form-error");
@@ -212,15 +214,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadTasks();
   await loadTodayWidget();
   await loadStatusSummary();
-
-  const params = new URLSearchParams(window.location.search);
-  if (params.get("edit")) {
-    openTaskModal(params.get("edit"));
-  } else if (params.get("new_date")) {
-    await openTaskModal(null);
-    document.getElementById("task-start").value = params.get("new_date");
-    document.getElementById("task-end").value = params.get("new_date");
-  }
+  await loadCalendar();
 
   document.getElementById("category-filter").addEventListener("change", loadTasks);
   document.getElementById("status-filter").addEventListener("change", loadTasks);
@@ -282,4 +276,53 @@ async function loadStatusSummary() {
     <div class="col-auto"><span class="badge bg-secondary">취소 ${counts["취소"]}</span></div>
     <div class="col-auto"><span class="badge bg-info text-dark">진행률 ${progress}%</span></div>
   `;
+}
+
+let calendar;
+
+function exclusiveEnd(dateStr) {
+  if (!dateStr) return dateStr;
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + 1);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+async function loadCalendar() {
+  const resp = await fetch("/api/tasks");
+  const tasks = await resp.json();
+  const events = tasks.map((t) => ({
+    id: t.id,
+    title: t.title,
+    start: t.start_date,
+    end: exclusiveEnd(t.end_date),
+    classNames: [`status-${t.status}`],
+  }));
+
+  if (!calendar) {
+    calendar = new FullCalendar.Calendar(document.getElementById("calendar"), {
+      initialView: "dayGridMonth",
+      locale: "ko",
+      height: 800,
+      headerToolbar: {
+        left: "prev,next today",
+        center: "title",
+        right: "dayGridMonth,timeGridWeek",
+      },
+      events,
+      eventClick: (info) => openTaskModal(info.event.id),
+      dateClick: (info) => {
+        openTaskModal(null).then(() => {
+          document.getElementById("task-start").value = info.dateStr;
+          document.getElementById("task-end").value = info.dateStr;
+        });
+      },
+    });
+    calendar.render();
+  } else {
+    calendar.removeAllEventSources();
+    calendar.addEventSource(events);
+  }
 }
