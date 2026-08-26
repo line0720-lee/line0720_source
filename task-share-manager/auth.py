@@ -76,4 +76,6 @@ def me():
     user = db.execute(
         "SELECT id, emp_no, name, dept FROM users WHERE id = ?", (session["user_id"],)
     ).fetchone()
+    if user is None:
+        return jsonify(error="사용자를 찾을 수 없습니다"), 404
     return jsonify(dict(user))

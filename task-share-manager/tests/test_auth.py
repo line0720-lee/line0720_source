@@ -46,3 +46,19 @@ def test_logout_clears_session(client):
     client.post("/api/logout")
     resp = client.get("/api/me")
     assert resp.status_code == 401
+
+
+def test_me_returns_404_when_user_deleted_but_session_active(client, app):
+    register(client)
+    client.post("/api/login", json={"emp_no": "E100", "password": "pw1234"})
+
+    with app.app_context():
+        from db_conn import get_db
+
+        db = get_db()
+        db.execute("DELETE FROM users WHERE emp_no = 'E100'")
+        db.commit()
+
+    resp = client.get("/api/me")
+    assert resp.status_code == 404
+    assert "error" in resp.get_json()
