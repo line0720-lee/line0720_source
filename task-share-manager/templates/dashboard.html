@@ -1,1 +1,80 @@
-{% extends "base.html" %}{% block content %}<p>대시보드 준비 중</p>{% endblock %}
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex gap-2">
+    <select id="category-filter" class="form-select" style="width: auto;">
+      <option value="">전체 카테고리</option>
+    </select>
+    <select id="status-filter" class="form-select" style="width: auto;">
+      <option value="">전체 상태</option>
+      <option value="진행중">진행중</option>
+      <option value="완료">완료</option>
+      <option value="취소">취소</option>
+    </select>
+  </div>
+  <div class="d-flex gap-2">
+    <button id="new-category-btn" class="btn btn-outline-secondary">카테고리 관리</button>
+    <button id="new-task-btn" class="btn btn-primary">업무 등록</button>
+  </div>
+</div>
+
+<div id="task-list" class="row g-3"></div>
+
+<!-- 업무 등록/수정 모달 -->
+<div class="modal fade" id="task-modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="task-form">
+        <div class="modal-header">
+          <h5 class="modal-title">업무 등록</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="task-id">
+          <div class="mb-2">
+            <label class="form-label">제목</label>
+            <input type="text" id="task-title" class="form-control" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">내용</label>
+            <textarea id="task-content" class="form-control"></textarea>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">카테고리</label>
+            <select id="task-category" class="form-select"></select>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">담당자 ID</label>
+            <input type="number" id="task-assignee" class="form-control" required>
+          </div>
+          <div class="row">
+            <div class="col mb-2">
+              <label class="form-label">시작일</label>
+              <input type="date" id="task-start" class="form-control">
+            </div>
+            <div class="col mb-2">
+              <label class="form-label">종료일</label>
+              <input type="date" id="task-end" class="form-control">
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">상태</label>
+            <select id="task-status" class="form-select">
+              <option value="진행중">진행중</option>
+              <option value="완료">완료</option>
+              <option value="취소">취소</option>
+            </select>
+          </div>
+          <div id="task-form-error" class="alert alert-danger d-none"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}
