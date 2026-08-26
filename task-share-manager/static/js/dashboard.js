@@ -17,6 +17,15 @@ async function loadCategories() {
   const categories = await resp.json();
   const filterSelect = document.getElementById("category-filter");
   const formSelect = document.getElementById("task-category");
+
+  // Clear existing options, preserving placeholder in category-filter
+  // category-filter has placeholder at index 0, remove options at index 1+
+  while (filterSelect.options.length > 1) {
+    filterSelect.remove(1);
+  }
+  // task-category has no placeholder, clear completely
+  formSelect.innerHTML = "";
+
   categories.forEach((c) => {
     const opt1 = new Option(c.name, c.id);
     filterSelect.add(opt1);
