@@ -136,6 +136,62 @@ async function submitTaskForm(e) {
   }
 }
 
+let categoryModal;
+
+function renderCategoryManageList(categories) {
+  const list = document.getElementById("category-manage-list");
+  const shareSelect = document.getElementById("share-category-select");
+  list.innerHTML = "";
+  shareSelect.innerHTML = "";
+  categories.forEach((c) => {
+    const li = document.createElement("li");
+    li.className = "list-group-item";
+    li.textContent = `${c.name} — ${c.description || ""}`;
+    list.appendChild(li);
+    shareSelect.add(new Option(c.name, c.id));
+  });
+}
+
+document.getElementById("new-category-btn")?.addEventListener("click", async () => {
+  if (!categoryModal) categoryModal = new bootstrap.Modal(document.getElementById("category-modal"));
+  const resp = await fetch("/api/categories");
+  renderCategoryManageList(await resp.json());
+  categoryModal.show();
+});
+
+document.getElementById("new-category-form")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = document.getElementById("new-category-name").value;
+  await fetch("/api/categories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  document.getElementById("new-category-name").value = "";
+  const resp = await fetch("/api/categories");
+  const categories = await resp.json();
+  renderCategoryManageList(categories);
+  await loadCategories();
+});
+
+document.getElementById("add-share-btn")?.addEventListener("click", async () => {
+  const categoryId = document.getElementById("share-category-select").value;
+  const userId = Number(document.getElementById("share-user-id").value);
+  if (!categoryId || !userId) return;
+  const resp = await fetch(`/api/categories/${categoryId}/shares`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (resp.ok) {
+    document.getElementById("share-user-id").value = "";
+    alert("공유 대상자가 등록되었습니다");
+  } else {
+    const data = await resp.json();
+    alert(data.error || "등록 실패");
+  }
+});
+
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await requireLogin();
   if (!user) return;

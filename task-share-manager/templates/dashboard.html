@@ -74,6 +74,33 @@
     </div>
   </div>
 </div>
+
+<!-- 카테고리 관리 모달 -->
+<div class="modal fade" id="category-modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">카테고리 관리</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form id="new-category-form" class="d-flex gap-2 mb-3">
+          <input type="text" id="new-category-name" class="form-control" placeholder="새 카테고리 이름" required>
+          <button type="submit" class="btn btn-primary">추가</button>
+        </form>
+        <ul id="category-manage-list" class="list-group"></ul>
+
+        <hr>
+        <h6>공유 대상자 지정 (사용자 ID 입력)</h6>
+        <div class="d-flex gap-2">
+          <select id="share-category-select" class="form-select"></select>
+          <input type="number" id="share-user-id" class="form-control" placeholder="사용자 ID">
+          <button id="add-share-btn" class="btn btn-outline-primary">공유 등록</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
