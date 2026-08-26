@@ -1,6 +1,8 @@
 {
   "permissions": {
     "allow": [
+      "PowerShell(*)",
+      "Bash(*)",
       "Bash(python \"C:\\\\Claude\\(바이브코딩\\)\\\\Study\\\\hello_world.py\")",
       "Bash(pip install *)",
       "Bash(python -c \"import database; import pdf_generator; import app; print\\('모든 모듈 로드 성공'\\)\")",
@@ -51,7 +53,33 @@
       "Bash(dotnet build *)",
       "PowerShell($env:PATH += \";C:\\\\Program Files\\\\dotnet;C:\\\\Program Files \\(x86\\)\\\\dotnet\"; where.exe dotnet 2>&1)",
       "Bash(dir \"C:\\\\Claude\\(바이브코딩\\)\\\\Study\\\\SFM\")",
-      "PowerShell(winget --version 2>&1)"
-    ]
+      "PowerShell(winget --version 2>&1)",
+      "Bash(git rm *)",
+      "PowerShell(Get-Process -Name \"SFM\" -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 500; $p = Start-Process \"C:\\\\Claude\\(바이브코딩\\)\\\\Study\\\\SFM\\\\bin\\\\Release\\\\net8.0-windows\\\\win-x64\\\\SFM.exe\" -PassThru; Start-Sleep -Milliseconds 2500; if \\($p.HasExited\\) { \"EXITED code=$\\($p.ExitCode\\)\" } else { \"Running PID=$\\($p.Id\\) Mem=$\\([math]::Round\\($p.WorkingSet64/1MB,1\\)\\)MB\" })",
+      "PowerShell(Start-Sleep -Milliseconds 4000; Get-Process -Name \"SFM\" -ErrorAction SilentlyContinue | Select-Object Id, @{n='Mem\\(MB\\)';e={[math]::Round\\($_.WorkingSet64/1MB,1\\)}})",
+      "Bash(Get-Process -Name \"SFM\" -ErrorAction SilentlyContinue)",
+      "Bash(Stop-Process -Force)",
+      "Bash(Write-Host \"Done\")",
+      "Bash(del \"C:\\\\Claude\\(바이브코딩\\)\\\\Study\\\\SFM\\\\UI\\\\SearchResultItem.cs\")",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(git ls-remote *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(ls -la \"C:/Claude\\(바이브코딩\\)/Lee_Harness\" 2>&1)",
+      "Read(//c/Users/USER/.claude/**)",
+      "Bash(claude plugin *)",
+      "Bash(cp 'C:\\\\Users\\\\USER/.claude/settings.json' 'C:\\\\Users\\\\USER/.claude/settings.json.bak')",
+      "Bash(cat)",
+      "PowerShell(Get-Command claude -All -ErrorAction SilentlyContinue)",
+      "PowerShell($pythonPath = \"C:\\\\Claude\\(바이브코딩\\)\\\\Study\\\\.claude\\\\worktrees\\\\task-share-manager\\\\task-share-manager\\\\venv\\\\Scripts\\\\python.exe\"; & $pythonPath -m pytest \"C:\\\\Claude\\(바이브코딩\\)\\\\Study\\\\.claude\\\\worktrees\\\\task-share-manager\\\\task-share-manager\\\\tests\\\\\" -v)",
+      "PowerShell($pythonPath = \"C:\\\\Claude\\(바이브코딩\\)\\\\Study\\\\.claude\\\\worktrees\\\\task-share-manager\\\\task-share-manager\\\\venv\\\\Scripts\\\\python.exe\"; & $pythonPath \"C:\\\\Claude\\(바이브코딩\\)\\\\Study\\\\.claude\\\\worktrees\\\\task-share-manager\\\\task-share-manager\\\\db\\\\seed.py\")",
+      "PowerShell(Start-Process -NoNewWindow -FilePath $pythonPath -ArgumentList \"app.py\" -WorkingDirectory $cwd -PassThru)",
+      "PowerShell(Get-Process python | Where-Object { $_.ProcessName -eq \"python\" } | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1)",
+      "PowerShell(curl http://localhost:5000/health)",
+      "PowerShell(curl http://localhost:5050/health -UseBasicParsing)",
+      "PowerShell(curl http://localhost:5050/dashboard -UseBasicParsing)",
+      "PowerShell(Head -30)"
+    ],
+    "defaultMode": "bypassPermissions"
   }
 }

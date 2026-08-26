@@ -208,9 +208,53 @@ document.addEventListener("DOMContentLoaded", async () => {
   taskModal = new bootstrap.Modal(document.getElementById("task-modal"));
   await loadCategories();
   await loadTasks();
+  await loadTodayWidget();
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("edit")) {
+    openTaskModal(params.get("edit"));
+  } else if (params.get("new_date")) {
+    await openTaskModal(null);
+    document.getElementById("task-start").value = params.get("new_date");
+    document.getElementById("task-end").value = params.get("new_date");
+  }
 
   document.getElementById("category-filter").addEventListener("change", loadTasks);
   document.getElementById("status-filter").addEventListener("change", loadTasks);
   document.getElementById("new-task-btn").addEventListener("click", () => openTaskModal(null));
   document.getElementById("task-form").addEventListener("submit", submitTaskForm);
 });
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function loadTodayWidget() {
+  const resp = await fetch("/api/tasks");
+  const tasks = await resp.json();
+  const today = todayStr();
+
+  const todays = tasks.filter(
+    (t) => t.status !== "취소" && (t.start_date === today || t.end_date === today)
+  );
+
+  const priorityCategoryNames = ["수술", "시술", "치료"];
+  todays.sort((a, b) => {
+    const aPriority = priorityCategoryNames.includes(a.category_name) ? 0 : 1;
+    const bPriority = priorityCategoryNames.includes(b.category_name) ? 0 : 1;
+    return aPriority - bPriority;
+  });
+
+  const list = document.getElementById("today-list");
+  list.innerHTML = "";
+  if (todays.length === 0) {
+    list.innerHTML = '<li class="list-group-item text-muted">오늘 시작/마감 업무가 없습니다</li>';
+    return;
+  }
+  todays.forEach((t) => {
+    const li = document.createElement("li");
+    li.className = "list-group-item";
+    li.textContent = `[${t.status}] ${t.title} (${t.start_date} ~ ${t.end_date || "-"})`;
+    list.appendChild(li);
+  });
+}

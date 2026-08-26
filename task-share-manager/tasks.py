@@ -72,7 +72,10 @@ def list_tasks():
     status_filter = request.args.get("status")
     category_filter = request.args.get("category_id")
 
-    rows = db.execute("SELECT * FROM tasks").fetchall()
+    rows = db.execute(
+        """SELECT t.*, c.name AS category_name
+           FROM tasks t LEFT JOIN categories c ON c.id = t.category_id"""
+    ).fetchall()
     visible = [dict(r) for r in rows if can_view_task(db, r, user_id)]
     if status_filter:
         visible = [t for t in visible if t["status"] == status_filter]
