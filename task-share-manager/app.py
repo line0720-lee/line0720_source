@@ -44,6 +44,18 @@ def create_app(test_config=None):
     def calendar_page():
         return render_template("calendar.html")
 
+    @app.errorhandler(404)
+    def not_found(e):
+        return jsonify(error="찾을 수 없습니다"), 404
+
+    @app.errorhandler(405)
+    def method_not_allowed(e):
+        return jsonify(error="허용되지 않는 메서드입니다"), 405
+
+    @app.errorhandler(500)
+    def internal_error(e):
+        return jsonify(error="서버 오류가 발생했습니다"), 500
+
     return app
 
 
