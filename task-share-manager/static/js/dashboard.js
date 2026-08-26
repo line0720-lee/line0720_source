@@ -92,6 +92,7 @@ async function changeStatus(taskId, status) {
     body: JSON.stringify({ status }),
   });
   loadTasks();
+  loadStatusSummary();
 }
 
 async function openTaskModal(taskId) {
@@ -137,6 +138,7 @@ async function submitTaskForm(e) {
   if (resp.ok) {
     taskModal.hide();
     loadTasks();
+    loadStatusSummary();
   } else {
     const data = await resp.json();
     const errBox = document.getElementById("task-form-error");
@@ -209,6 +211,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadCategories();
   await loadTasks();
   await loadTodayWidget();
+  await loadStatusSummary();
 
   const params = new URLSearchParams(window.location.search);
   if (params.get("edit")) {
@@ -261,4 +264,22 @@ async function loadTodayWidget() {
     li.textContent = `[${t.status}] ${t.title} (${t.start_date} ~ ${t.end_date || "-"})`;
     list.appendChild(li);
   });
+}
+
+async function loadStatusSummary() {
+  const resp = await fetch("/api/tasks");
+  const tasks = await resp.json();
+
+  const counts = { "진행중": 0, "완료": 0, "취소": 0 };
+  tasks.forEach((t) => { counts[t.status] = (counts[t.status] || 0) + 1; });
+  const total = tasks.length;
+  const progress = total > 0 ? Math.round((counts["완료"] / total) * 100) : 0;
+
+  const el = document.getElementById("status-summary");
+  el.innerHTML = `
+    <div class="col-auto"><span class="badge bg-primary">진행중 ${counts["진행중"]}</span></div>
+    <div class="col-auto"><span class="badge bg-success">완료 ${counts["완료"]}</span></div>
+    <div class="col-auto"><span class="badge bg-secondary">취소 ${counts["취소"]}</span></div>
+    <div class="col-auto"><span class="badge bg-info text-dark">진행률 ${progress}%</span></div>
+  `;
 }
