@@ -1,5 +1,17 @@
 let taskModal;
 
+function escapeHtml(str) {
+  if (!str) return str;
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  };
+  return str.replace(/[&<>"']/g, m => map[m]);
+}
+
 async function loadCategories() {
   const resp = await fetch("/api/categories");
   const categories = await resp.json();
@@ -27,10 +39,10 @@ function renderTasks(tasks) {
     col.innerHTML = `
       <div class="card status-${t.status}">
         <div class="card-body">
-          <h5 class="card-title">${t.title}</h5>
+          <h5 class="card-title">${escapeHtml(t.title)}</h5>
           <span class="badge bg-${statusBadgeClass(t.status)}">${t.status}</span>
-          <p class="card-text mt-2">${t.content || ""}</p>
-          <p class="text-muted small">${t.start_date || "-"} ~ ${t.end_date || "-"}</p>
+          <p class="card-text mt-2">${escapeHtml(t.content || "")}</p>
+          <p class="text-muted small">${escapeHtml(t.start_date || "-")} ~ ${escapeHtml(t.end_date || "-")}</p>
           <div class="d-flex gap-2">
             <button class="btn btn-sm btn-outline-primary edit-btn" data-id="${t.id}">수정</button>
             <button class="btn btn-sm btn-outline-success complete-btn" data-id="${t.id}">완료 처리</button>
