@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>로그인 - 업무 공유 매니저</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="bg-light">
+  <div class="d-flex justify-content-center align-items-center vh-100">
+    <div class="card p-4 shadow-sm" style="width: 22rem;">
+      <h4 class="mb-3 text-center">업무 공유 매니저</h4>
+      <div id="login-error" class="alert alert-danger d-none"></div>
+      <form id="login-form">
+        <div class="mb-3">
+          <label class="form-label">사번</label>
+          <input type="text" class="form-control" id="emp_no" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">비밀번호</label>
+          <input type="password" class="form-control" id="password" required>
+        </div>
+        <button type="submit" class="btn btn-primary w-100">로그인</button>
+      </form>
+    </div>
+  </div>
+  <script>
+    document.getElementById("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const emp_no = document.getElementById("emp_no").value;
+      const password = document.getElementById("password").value;
+      const resp = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emp_no, password }),
+      });
+      if (resp.ok) {
+        window.location.href = "/dashboard";
+      } else {
+        const data = await resp.json();
+        const errBox = document.getElementById("login-error");
+        errBox.textContent = data.error || "로그인에 실패했습니다";
+        errBox.classList.remove("d-none");
+      }
+    });
+  </script>
+</body>
+</html>

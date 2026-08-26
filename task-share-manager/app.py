@@ -26,6 +26,24 @@ def create_app(test_config=None):
         except Exception:
             return jsonify(status="error", db="disconnected"), 500
 
+    from flask import redirect, render_template, session, url_for
+
+    @app.route("/")
+    def index():
+        return redirect(url_for("dashboard_page"))
+
+    @app.route("/login")
+    def login_page():
+        return render_template("login.html")
+
+    @app.route("/dashboard")
+    def dashboard_page():
+        return render_template("dashboard.html")
+
+    @app.route("/calendar")
+    def calendar_page():
+        return render_template("calendar.html")
+
     return app
 
 

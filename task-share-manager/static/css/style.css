@@ -1,0 +1,7 @@
+.status-진행중 { border-left: 4px solid #0d6efd; }
+.status-완료 { border-left: 4px solid #198754; opacity: 0.75; }
+.status-취소 { border-left: 4px solid #6c757d; opacity: 0.5; text-decoration: line-through; }
+
+.fc-event.status-진행중 { background-color: #0d6efd; border-color: #0d6efd; }
+.fc-event.status-완료 { background-color: #198754; border-color: #198754; }
+.fc-event.status-취소 { background-color: #6c757d; border-color: #6c757d; }
