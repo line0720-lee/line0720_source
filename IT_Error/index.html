@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>전산장애 도우미</title>
+  <title>전산도우미</title>
   <style>
     /* ── 토큰 ──────────────────────────────── */
     :root {
@@ -107,7 +107,10 @@
       width: 34px; height: 34px; border-radius: 9px;
       background: var(--accent); display: flex; align-items: center;
       justify-content: center; font-size: 1.1rem; flex-shrink: 0;
+      cursor: pointer; transition: transform .12s, filter .12s;
     }
+    .h-logo:hover  { filter: brightness(1.15); }
+    .h-logo:active { transform: scale(.92); }
     .h-title { font-size: .98rem; font-weight: 700; color: #F0F6FF; line-height: 1.2; }
     .h-sub   { font-size: .7rem; color: #7A9AC0; font-weight: 400; }
 
@@ -323,11 +326,26 @@
 
     /* 섹션 그룹 */
     .sec-group { display: flex; flex-direction: column; gap: 6px; }
-    .sec-label {
-      font-size: .75rem; font-weight: 700; color: var(--accent);
-      letter-spacing: .04em; padding: 2px 0; border-bottom: 1px solid var(--border);
-      margin-bottom: 2px;
+    .sec-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 2px 0 4px; border-bottom: 1px solid var(--border); margin-bottom: 2px;
     }
+    .sec-label { font-size: .75rem; font-weight: 700; color: var(--accent); letter-spacing: .04em; }
+    .sec-empty { font-size: .78rem; color: var(--muted); padding: 6px 2px; }
+
+    /* 섹션 관리 패널 */
+    .sp-list {
+      display: flex; flex-direction: column; gap: 2px;
+      max-height: 280px; overflow-y: auto;
+      border: 1px solid var(--border); border-radius: 8px; padding: 4px;
+    }
+    .sp-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; }
+    .sp-row:hover, .sp-row.editing { background: var(--bg); }
+    .sp-num { font-weight: 700; color: var(--accent); font-size: .85rem; min-width: 48px; flex-shrink: 0; }
+    .sp-label { flex: 1; min-width: 0; font-size: .85rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sp-count { font-size: .72rem; color: var(--muted); flex-shrink: 0; }
+    .sp-input { flex: 1; padding: 4px 8px; font-size: .82rem; }
+    .qna-author { font-size: .74rem; color: var(--muted); white-space: nowrap; flex-shrink: 0; margin-top: 5px; }
 
     /* Q&A 카드 */
     .qna-card {
@@ -445,14 +463,15 @@
 <body>
 
 <!-- 백엔드 주소 — 여기 한 곳만 수정 -->
-<script>const BE = "http://127.0.0.1:8000";</script>
+<!-- 운영 서버가 이 파일을 서빙하면(포트·프록시 무관) 같은 오리진을 쓰고, 로컬 정적 서버(:3002)나 파일로 열면 운영 서버로 붙는다 -->
+<script>const BE = (location.port === "3002" || location.protocol === "file:") ? "http://112.160.143.66:8000" : location.origin;</script>
 
 <!-- ── 헤더 ── -->
 <header>
   <div class="h-left">
-    <div class="h-logo">🏥</div>
+    <div class="h-logo" onclick="location.reload()" title="새로고침" role="button">🏥</div>
     <div>
-      <div class="h-title">전산장애 도우미</div>
+      <div class="h-title">전산도우미</div>
       <div class="h-sub">정보지원팀 RAG 챗봇</div>
     </div>
   </div>
@@ -480,7 +499,7 @@
 
     <div class="modal-toolbar">
       <button class="btn btn-primary" onclick="showAddForm()">＋ 새 항목 추가</button>
-      <button class="btn btn-ghost" onclick="showAddSectionForm()">📁 새 섹션</button>
+      <button class="btn btn-ghost" onclick="showAddSectionForm()">📁 섹션 관리</button>
     </div>
 
     <div class="modal-body" id="editorBody">
@@ -607,7 +626,7 @@ function showRetrieval(id, hits) {
   if (!wrap || !hits.length) return;
   const rows = hits.map((h, i) => {
     const src = h.chunk.isQna
-      ? `<b>${h.chunk.qId}</b> — ${h.chunk.section}`
+      ? `<b>${h.chunk.qId}</b> — ${escHtml(displaySection(h.chunk.section))}`
       : `${h.chunk.file} ${h.chunk.startLine}~${h.chunk.endLine}줄`;
     return `<div class="ret-row"><span class="ret-src">[${i+1}] ${src}</span><span class="ret-score">${(h.score*100).toFixed(1)}%</span></div>`;
   }).join('');
@@ -662,8 +681,10 @@ function toggleRet(id) {
   if (btn) btn.textContent = `📎 참고 구간 ${p.children.length}건 ${open ? '▴' : '▾'}`;
 }
 
+// 속성값(value="…", title="…")에도 쓰이므로 따옴표까지 이스케이프
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+          .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function highlightCites(raw) {
@@ -755,9 +776,12 @@ async function autoLoadData() {
     }
     if (f.type === 'qna') {
       for (const it of f.items) {
+        if (isPlaceholder(it)) continue;  // 빈 섹션 자리표시는 챗봇 검색에서 제외
+        // 등록자 마커는 검색·답변 근거에서 제외
+        const text = it.text.split('\n').filter(l => !/^-\s*\[BY:.*\]$/.test(l)).join('\n');
         allChunks.push({
           file: f.filename, startLine: it.id, endLine: it.id,
-          text: it.text, display: it.text,
+          text, display: text,
           qId: it.id, section: it.section, isQna: true,
           images: it.images || [],
         });
@@ -793,7 +817,7 @@ async function autoLoadData() {
     pBar.style.width = '100%';
     setTimeout(() => { pWrap.classList.remove('on'); pBar.style.width = '0'; }, 700);
     updateBubble(sysId, `✅ 준비 완료 — ${totalFiles}개 파일 · ${total}개 청크 (bge-m3)`);
-    appendMsg('bot', '안녕하세요! 정보지원팀 <b>전산장애 도우미</b>입니다.\n전산 장애 관련 질문을 입력해 주세요.');
+    appendMsg('bot', '안녕하세요! 정보지원팀 <b>전산도우미</b>입니다.\n전산 장애 관련 질문을 입력해 주세요.');
   } catch(err) {
     updateBubble(sysId, `❌ 임베딩 실패: ${escHtml(err.message)}`);
     vectorStore = null;
@@ -848,7 +872,7 @@ async function sendChat() {
   /* 컨텍스트 */
   const context = hits.map((h,i) => {
     const hdr = h.chunk.isQna
-      ? `[구간 ${i+1}] 파일: ${h.chunk.file} · ${h.chunk.qId} (${h.chunk.section})`
+      ? `[구간 ${i+1}] 파일: ${h.chunk.file} · ${h.chunk.qId} (${displaySection(h.chunk.section)})`
       : `[구간 ${i+1}] 파일: ${h.chunk.file} · ${h.chunk.startLine}~${h.chunk.endLine}줄`;
     return `${hdr}\n${h.chunk.display}`;
   }).join('\n\n');
@@ -911,6 +935,46 @@ let editorItems = [];   // 편집 중인 Q&A 배열 (객체 참조)
 let formImagesMap = {}; // 편집 폼별 첨부 이미지 임시 저장 { containerId: [filename,...] }
 
 const ROMAN = ['Ⅰ','Ⅱ','Ⅲ','Ⅳ','Ⅴ','Ⅵ','Ⅶ','Ⅷ','Ⅸ','Ⅹ'];
+const ROMAN_TENS = ['', 'Ⅹ', 'ⅩⅩ', 'ⅩⅩⅩ', 'ⅩⅬ', 'Ⅼ', 'ⅬⅩ', 'ⅬⅩⅩ', 'ⅬⅩⅩⅩ', 'ⅩⅭ'];
+const MAX_SECTIONS = 99;
+const BY_RE = /^\[BY:(.*)\]$/;
+// 서버 파서는 Q&A가 없는 섹션 제목을 버리므로, 빈 섹션에는 숨김용 자리표시 항목을 하나 넣어 저장한다
+const EMPTY_MARK = '[EMPTY_SECTION]';
+const EMPTY_Q = '(빈 섹션 — Q&A 없음)';
+const isPlaceholder = it => (it.answer_lines || []).includes(EMPTY_MARK) || (it.text || '').includes(EMPTY_MARK);
+
+// 1~10은 기존 문서와 같은 단일 문자(Ⅱ 등), 11 이상은 조합(ⅩⅠ, ⅩⅬ, ⅩⅭⅨ)
+function toRoman(n) {
+  if (n <= 10) return ROMAN[n - 1];
+  return ROMAN_TENS[Math.floor(n / 10)] + (n % 10 ? ROMAN[n % 10 - 1] : '');
+}
+
+// 문서에는 로마 숫자로 저장(서버 파서가 Ⅰ~Ⅹ 첫 글자로 섹션을 인식)하고, 화면에만 01~99로 보여준다
+const ROMAN_TO_NUM = new Map(Array.from({ length: MAX_SECTIONS }, (_, i) => [toRoman(i + 1), i + 1]));
+
+function displayNum(roman) {
+  const n = ROMAN_TO_NUM.get(roman);
+  return n ? String(n).padStart(2, '0') : roman;
+}
+
+function displaySection(name) {
+  const { num, label } = splitSection(name);
+  return num ? `${displayNum(num)}. ${label}` : name;
+}
+
+// 빈 섹션은 문서에 저장되지 않아 번호에 빈칸이 생길 수 있으므로, 안 쓰는 번호를 고른다
+function nextSectionPrefix() {
+  const used = new Set(SECTIONS.map(s => splitSection(s).num));
+  for (let n = SECTIONS.length + 1; n <= MAX_SECTIONS; n++) {
+    if (!used.has(toRoman(n))) return toRoman(n);
+  }
+  return null;
+}
+
+function splitSection(name) {
+  const m = name.match(/^([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅬⅭ]+)\.\s*(.*)$/);
+  return m ? { num: m[1], label: m[2] } : { num: '', label: name };
+}
 
 function renderImgList(containerId) {
   const el = document.getElementById(containerId);
@@ -947,7 +1011,7 @@ async function handleImgInput(containerId, inputEl) {
   renderImgList(containerId);
 }
 
-let SECTIONS = [
+const DEFAULT_SECTIONS = [
   "Ⅰ. PC·단말기 관련",
   "Ⅱ. 네트워크 관련",
   "Ⅲ. 프린터·주변기기 관련",
@@ -955,6 +1019,7 @@ let SECTIONS = [
   "Ⅴ. 서버·전원 관련",
   "Ⅵ. 보안 관련",
 ];
+let SECTIONS = [...DEFAULT_SECTIONS];
 
 async function openEditor() {
   document.getElementById('editorOverlay').classList.add('open');
@@ -967,9 +1032,20 @@ async function openEditor() {
     if (!res.ok) throw new Error('서버 오류 ' + res.status);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    editorItems = data.items.map((it, i) => ({ ...it, _key: i }));
-    // docx에 저장된 커스텀 섹션을 SECTIONS에 병합
-    editorItems.forEach(it => { if (!SECTIONS.includes(it.section)) SECTIONS.push(it.section); });
+    const docSections = [...new Set(data.items.map(it => it.section))];  // 자리표시 항목 포함 → 빈 섹션 순서도 유지
+    editorItems = data.items.filter(it => !isPlaceholder(it)).map((it, i) => {
+      const lines = it.answer_lines || [];
+      const byLine = lines.find(l => BY_RE.test(l));
+      return {
+        ...it,
+        answer_lines: lines.filter(l => !BY_RE.test(l)),
+        author: byLine ? byLine.match(BY_RE)[1].trim() : '',
+        _key: i,
+      };
+    });
+    SECTIONS = docSections.length ? docSections : [...DEFAULT_SECTIONS];
+    sectionPanelOpen = false;
+    panelEditIdx = -1;
     renderEditor();
   } catch(err) {
     document.getElementById('editorBody').innerHTML =
@@ -977,8 +1053,15 @@ async function openEditor() {
   }
 }
 
-function closeEditor() {
+// 섹션 변경이 저장됐으면 창을 닫을 때 한 번만 재색인 (변경마다 재색인하면 채팅창에 안내가 반복됨)
+async function closeEditor() {
   document.getElementById('editorOverlay').classList.remove('open');
+  while (sectionSaving) await new Promise(r => setTimeout(r, 200));
+  if (needsReindex) {
+    needsReindex = false;
+    appendMsg('system', '💾 섹션 변경 반영 — 재색인 시작');
+    await autoLoadData();
+  }
 }
 function overlayClick(e) {
   if (e.target === document.getElementById('editorOverlay')) closeEditor();
@@ -1000,13 +1083,17 @@ function renderEditor() {
   const body = document.getElementById('editorBody');
   body.innerHTML = '';
 
-  SECTIONS.forEach(sec => {
-    const arr = groups[sec];
-    if (!arr.length) return;
+  SECTIONS.forEach((sec, idx) => {
+    const arr = groups[sec] || [];
 
     const grp = document.createElement('div');
     grp.className = 'sec-group';
-    grp.innerHTML = `<div class="sec-label">${escHtml(sec)}</div>`;
+    grp.id = 'sec-' + idx;
+    grp.innerHTML = `
+      <div class="sec-head">
+        <span class="sec-label">${escHtml(displaySection(sec))}</span>
+      </div>
+      ${arr.length ? '' : '<div class="sec-empty">항목 없음</div>'}`;
 
     arr.forEach(it => {
       const card = document.createElement('div');
@@ -1016,6 +1103,7 @@ function renderEditor() {
         <div class="qna-card-head">
           <span class="qna-qnum">Q${q}</span>
           <span class="qna-qtxt">${escHtml(it.question)}</span>
+          ${it.author ? `<span class="qna-author">등록자: ${escHtml(it.author)}</span>` : ''}
           <div class="qna-actions">
             <button class="qna-btn edit" onclick="startEdit(${it._key})">✏️ 수정</button>
             <button class="qna-btn del"  onclick="deleteItem(${it._key})">🗑️</button>
@@ -1033,6 +1121,8 @@ function renderEditor() {
 
     body.appendChild(grp);
   });
+
+  if (sectionPanelOpen) body.insertBefore(buildSectionPanel(), body.firstChild);
 }
 
 /* 편집 폼 */
@@ -1051,7 +1141,7 @@ function startEdit(key) {
       <div class="form-row">
         <label class="form-label">섹션</label>
         <select class="form-select" id="ef-sec-${key}">
-          ${SECTIONS.map(s => `<option value="${escHtml(s)}" ${s===it.section?'selected':''}>${escHtml(s)}</option>`).join('')}
+          ${SECTIONS.map(s => `<option value="${escHtml(s)}" ${s===it.section?'selected':''}>${escHtml(displaySection(s))}</option>`).join('')}
         </select>
       </div>
       <div class="form-row">
@@ -1071,6 +1161,10 @@ function startEdit(key) {
           <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple onchange="handleImgInput('${imgListId}', this)" />
         </label>
       </div>
+      <div class="form-row">
+        <label class="form-label">등록자 <span style="color:#EF4444">*</span></label>
+        <input class="form-input" id="ef-by-${key}" value="${escHtml(it.author || '')}" placeholder="등록자 이름" maxlength="20" />
+      </div>
       <div class="form-btns">
         <button class="btn btn-ghost" onclick="cancelEditForm('${imgListId}')">취소</button>
         <button class="btn btn-primary" onclick="applyEdit(${key})">저장</button>
@@ -1088,6 +1182,9 @@ function applyEdit(key) {
   const it = editorItems.find(x => x._key === key);
   if (!it) return;
   const imgListId = `img-list-${key}`;
+  const author = document.getElementById('ef-by-' + key).value.trim();
+  if (!author) { alert('등록자 이름을 입력해 주세요.'); return; }
+  it.author       = author;
   it.section      = document.getElementById('ef-sec-' + key).value;
   it.question     = document.getElementById('ef-q-'   + key).value.trim();
   it.answer_lines = document.getElementById('ef-a-'   + key).value
@@ -1104,43 +1201,157 @@ function deleteItem(key) {
   renderEditor();
 }
 
-/* 새 섹션 추가 폼 */
+/* 섹션 이름 변경 (섹션 관리 패널에서 사용) */
+function renameSectionAt(idx, rawLabel) {
+  const label = rawLabel.trim();
+  if (!label) { alert('섹션명을 입력해 주세요.'); return false; }
+  const oldName = SECTIONS[idx];
+  const { num } = splitSection(oldName);
+  const newName = num ? `${num}. ${label}` : label;
+  if (newName !== oldName && SECTIONS.includes(newName)) { alert('이미 존재하는 섹션입니다.'); return false; }
+  applySectionRenames(new Map([[oldName, newName]]));
+  return true;
+}
+
+/* 섹션 삭제 — 항목이 남아 있으면 막는다 */
+function deleteSection(idx) {
+  const name = SECTIONS[idx];
+  const count = editorItems.filter(it => it.section === name).length;
+  if (count) {
+    alert(`이 섹션에 Q&A ${count}개가 있어 삭제할 수 없습니다.\n항목을 다른 섹션으로 옮기거나 먼저 삭제해 주세요.`);
+    return;
+  }
+  if (!confirm(`"${displaySection(name)}" 섹션을 삭제하시겠습니까?`)) return;
+  SECTIONS.splice(idx, 1);
+  renumberSections();
+  panelEditIdx = -1;
+  renderEditor();
+  saveSectionChange();
+}
+
+// 삭제 후 번호가 비지 않도록 Ⅰ부터 다시 매긴다
+function renumberSections() {
+  const renames = new Map();
+  SECTIONS.forEach((name, i) => {
+    const { num, label } = splitSection(name);
+    const next = `${toRoman(i + 1)}. ${label}`;
+    if (num && next !== name) renames.set(name, next);
+  });
+  applySectionRenames(renames);
+}
+
+// 여러 이름을 한 번에 바꿔야 연쇄 치환(Ⅳ→Ⅲ→Ⅱ)이 생기지 않는다
+function applySectionRenames(renames) {
+  if (!renames.size) return;
+  SECTIONS = SECTIONS.map(s => renames.get(s) ?? s);
+  editorItems.forEach(it => { if (renames.has(it.section)) it.section = renames.get(it.section); });
+}
+
+/* 섹션 관리 패널 (추가 + 목록에서 수정·삭제) */
+let sectionPanelOpen = false;
+let panelEditIdx = -1;
+
 function showAddSectionForm() {
-  const body = document.getElementById('editorBody');
-  if (document.getElementById('new-sec-form')) { document.getElementById('nf-sec-name').focus(); return; }
-  const prefix = ROMAN[SECTIONS.length] ?? String(SECTIONS.length + 1);
-  const form = document.createElement('div');
-  form.className = 'edit-form';
-  form.id = 'new-sec-form';
-  form.innerHTML = `
-    <div style="font-size:.82rem;font-weight:700;color:var(--accent);margin-bottom:6px">📁 새 섹션 추가</div>
+  sectionPanelOpen = true;
+  panelEditIdx = -1;
+  renderEditor();
+  document.getElementById('editorBody').scrollTop = 0;
+  document.getElementById('nf-sec-name')?.focus();
+}
+
+function closeSectionPanel() {
+  sectionPanelOpen = false;
+  panelEditIdx = -1;
+  renderEditor();
+}
+
+// renderEditor가 본문을 다시 그릴 때마다 맨 위에 다시 붙인다
+function buildSectionPanel() {
+  const prefix = nextSectionPrefix();
+  const rows = SECTIONS.map((sec, idx) => {
+    const { num, label } = splitSection(sec);
+    const numHtml = `<span class="sp-num">${num ? escHtml(displayNum(num)) + '.' : ''}</span>`;
+    if (idx === panelEditIdx) {
+      return `<div class="sp-row editing">
+        ${numHtml}
+        <input class="form-input sp-input" id="sp-edit-input" value="${escHtml(label)}"
+               onkeydown="if(event.key==='Enter')applyPanelEdit(${idx});if(event.key==='Escape')cancelPanelEdit()" />
+        <button class="qna-btn" onclick="cancelPanelEdit()">취소</button>
+        <button class="qna-btn edit" onclick="applyPanelEdit(${idx})">저장</button>
+      </div>`;
+    }
+    const count = editorItems.filter(it => it.section === sec).length;
+    return `<div class="sp-row">
+      ${numHtml}
+      <span class="sp-label" title="${escHtml(label)}">${escHtml(label)}</span>
+      <span class="sp-count">${count}개</span>
+      <button class="qna-btn edit" onclick="startPanelEdit(${idx})">✏️ 수정</button>
+      <button class="qna-btn del" onclick="deleteSection(${idx})">🗑️ 삭제</button>
+    </div>`;
+  }).join('');
+
+  const panel = document.createElement('div');
+  panel.className = 'edit-form';
+  panel.id = 'new-sec-form';
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:.82rem;font-weight:700;color:var(--accent)">📁 섹션 관리</span>
+      <span class="sp-count">${SECTIONS.length} / ${MAX_SECTIONS}</span>
+    </div>
     <div class="form-row">
-      <label class="form-label">섹션명</label>
+      <label class="form-label">새 섹션명</label>
+      ${prefix ? `
       <div style="display:flex;align-items:center;gap:8px">
-        <span style="font-weight:700;color:var(--accent);font-size:1rem;flex-shrink:0">${escHtml(prefix)}.</span>
-        <input class="form-input" id="nf-sec-name" placeholder="예: 기타 관련" style="flex:1" />
+        <span style="font-weight:700;color:var(--accent);font-size:1rem;flex-shrink:0">${escHtml(displayNum(prefix))}.</span>
+        <input class="form-input" id="nf-sec-name" placeholder="예: 기타 관련" style="flex:1"
+               onkeydown="if(event.key==='Enter')applyAddSection()" />
+        <button class="btn btn-primary" onclick="applyAddSection()">섹션 추가</button>
       </div>
-      <span class="form-hint">자동으로 "${escHtml(prefix)}. 입력값" 형식으로 생성됩니다.</span>
+      <span class="form-hint">자동으로 "${escHtml(displayNum(prefix))}. 입력값" 형식으로 생성됩니다.</span>`
+      : `<span class="form-hint">섹션은 최대 ${MAX_SECTIONS}개까지 만들 수 있습니다.</span>`}
+    </div>
+    <div class="form-row">
+      <label class="form-label">등록된 섹션</label>
+      <div class="sp-list">${rows || '<span class="form-hint">섹션이 없습니다.</span>'}</div>
+      <span class="form-hint">추가·수정·삭제는 바로 서버 문서에 저장됩니다.<br>Q&A가 들어 있는 섹션은 항목을 옮기거나 지운 뒤 삭제할 수 있습니다.</span>
     </div>
     <div class="form-btns">
-      <button class="btn btn-ghost" onclick="document.getElementById('new-sec-form').remove()">취소</button>
-      <button class="btn btn-primary" onclick="applyAddSection()">섹션 추가</button>
+      <button class="btn btn-ghost" onclick="closeSectionPanel()">닫기</button>
     </div>`;
-  body.insertBefore(form, body.firstChild);
-  body.scrollTop = 0;
-  document.getElementById('nf-sec-name').focus();
+  return panel;
+}
+
+function startPanelEdit(idx) {
+  panelEditIdx = idx;
+  renderEditor();
+  const input = document.getElementById('sp-edit-input');
+  if (input) { input.focus(); input.select(); }
+}
+
+function cancelPanelEdit() {
+  panelEditIdx = -1;
+  renderEditor();
+}
+
+function applyPanelEdit(idx) {
+  const before = SECTIONS[idx];
+  if (!renameSectionAt(idx, document.getElementById('sp-edit-input').value)) return;
+  panelEditIdx = -1;
+  renderEditor();
+  if (SECTIONS[idx] !== before) saveSectionChange();
 }
 
 function applyAddSection() {
-  const prefix = ROMAN[SECTIONS.length] ?? String(SECTIONS.length + 1);
+  const prefix = nextSectionPrefix();
+  if (!prefix) { alert(`섹션은 최대 ${MAX_SECTIONS}개까지 만들 수 있습니다.`); return; }
   const desc = document.getElementById('nf-sec-name').value.trim();
   if (!desc) { alert('섹션명을 입력해 주세요.'); return; }
   const fullName = `${prefix}. ${desc}`;
   if (SECTIONS.includes(fullName)) { alert('이미 존재하는 섹션입니다.'); return; }
   SECTIONS.push(fullName);
-  document.getElementById('new-sec-form').remove();
   renderEditor();
-  showAddForm(fullName);  // 해당 섹션 선택된 상태로 항목 추가 폼 자동 오픈
+  document.getElementById('nf-sec-name')?.focus();
+  saveSectionChange();
 }
 
 /* 새 항목 추가 폼 */
@@ -1159,7 +1370,7 @@ function showAddForm(preSection) {
     <div class="form-row">
       <label class="form-label">섹션</label>
       <select class="form-select" id="nf-sec">
-        ${SECTIONS.map(s => `<option value="${escHtml(s)}" ${s===preSection?'selected':''}>${escHtml(s)}</option>`).join('')}
+        ${SECTIONS.map(s => `<option value="${escHtml(s)}" ${s===preSection?'selected':''}>${escHtml(displaySection(s))}</option>`).join('')}
       </select>
     </div>
     <div class="form-row">
@@ -1178,6 +1389,10 @@ function showAddForm(preSection) {
         📷 이미지 추가
         <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple onchange="handleImgInput('${imgListId}', this)" />
       </label>
+    </div>
+    <div class="form-row">
+      <label class="form-label">등록자 <span style="color:#EF4444">*</span></label>
+      <input class="form-input" id="nf-by" placeholder="등록자 이름" maxlength="20" />
     </div>
     <div class="form-btns">
       <button class="btn btn-ghost" onclick="cancelAddForm()">취소</button>
@@ -1202,13 +1417,69 @@ function applyAdd() {
   const a   = document.getElementById('nf-a').value
     .split('\n').map(l => l.trim()).filter(Boolean);
 
+  const author = document.getElementById('nf-by').value.trim();
+
   if (!q) { alert('질문을 입력해 주세요.'); return; }
   if (!a.length) { alert('대응 방법을 입력해 주세요.'); return; }
+  if (!author) { alert('등록자 이름을 입력해 주세요.'); return; }
 
   const images = [...(formImagesMap['img-list-new'] || [])];
   delete formImagesMap['img-list-new'];
-  editorItems.push({ section: sec, question: q, answer_lines: a, images, _key: Date.now() });
+  editorItems.push({ section: sec, question: q, answer_lines: a, images, author, _key: Date.now() });
   renderEditor();
+}
+
+/* 서버 문서에 현재 편집 내용 저장 */
+async function postQnaSave() {
+  // 섹션 순서대로 묶어서 보내야 문서에서 한 섹션이 둘로 쪼개지지 않는다
+  const ordered = [
+    ...SECTIONS.flatMap(sec => {
+      const its = editorItems.filter(it => it.section === sec);
+      return its.length ? its : [{ section: sec, question: EMPTY_Q, answer_lines: [EMPTY_MARK], images: [], author: '' }];
+    }),
+    ...editorItems.filter(it => !SECTIONS.includes(it.section)),
+  ];
+  const res = await fetch(BE + '/api/qna/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      items: ordered.map(({ section, question, answer_lines, images, author }) => ({
+        section, question,
+        answer_lines: author ? [...answer_lines, `[BY:${author}]`] : answer_lines,
+        images: images || [],
+      }))
+    }),
+  });
+  if (res.status === 401) throw new Error('저장 권한이 없습니다 (로그인 필요)');
+  if (!res.ok) throw new Error('서버 오류 ' + res.status);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+
+/* 섹션 변경 즉시 저장 — 연속으로 바꿔도 요청이 겹치지 않게 한 번에 하나씩 */
+let needsReindex = false;
+let sectionSaving = false;
+let sectionSavePending = false;
+
+async function saveSectionChange() {
+  if (sectionSaving) { sectionSavePending = true; return; }
+  sectionSaving = true;
+  const status = document.getElementById('editorStatus');
+  try {
+    do {
+      sectionSavePending = false;
+      status.textContent = '섹션 변경 저장 중…';
+      await postQnaSave();
+      needsReindex = true;
+      status.textContent = `✅ 섹션 변경 저장됨 (섹션 ${SECTIONS.length}개 · Q&A ${editorItems.length}건)`;
+    } while (sectionSavePending);
+  } catch(err) {
+    sectionSavePending = false;
+    status.textContent = `❌ 섹션 저장 실패: ${err.message} — '저장 및 재색인'으로 다시 시도하세요`;
+  } finally {
+    sectionSaving = false;
+  }
 }
 
 /* 전체 저장 + 재색인 */
@@ -1219,21 +1490,13 @@ async function saveAll() {
   status.textContent = '저장 중…';
 
   try {
-    const res = await fetch(BE + '/api/qna/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        items: editorItems.map(({ section, question, answer_lines, images }) =>
-          ({ section, question, answer_lines, images: images || [] }))
-      }),
-    });
-    if (!res.ok) throw new Error('서버 오류 ' + res.status);
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-
-    status.textContent = `✅ 저장 완료 (${data.count}건) — 재색인 중…`;
+    while (sectionSaving) await new Promise(r => setTimeout(r, 200));  // 섹션 즉시 저장과 겹치지 않게
+    await postQnaSave();
+    const count = editorItems.length;
+    status.textContent = `✅ 저장 완료 (${count}건) — 재색인 중…`;
+    needsReindex = false;  // 아래에서 직접 재색인하므로 closeEditor의 재색인은 건너뜀
     closeEditor();
-    appendMsg('system', `💾 문서 저장 완료 (${data.count}건) — 재색인 시작`);
+    appendMsg('system', `💾 문서 저장 완료 (${count}건) — 재색인 시작`);
     await autoLoadData();
   } catch(err) {
     status.textContent = '❌ ' + err.message;

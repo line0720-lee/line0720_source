@@ -205,7 +205,7 @@ def _parse_qna_paragraphs(paragraphs) -> list[dict]:
         t = para.text.strip()
         if not t:
             continue
-        if re.match(r'^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]', t):
+        if re.match(r'^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅬⅭ]', t):
             flush(); q_num = None; a_lines = []
             section = re.sub(r'\s+', ' ', t)
         elif m := re.match(r'^Q(\d+)\.\s+(.+)', t):
@@ -302,10 +302,8 @@ async def save_qna(req: SaveQnaRequest):
     try:
         from docx import Document as DocxDocument
 
-        # 섹션 정렬
-        order_idx = {s: i for i, s in enumerate(SECTION_ORDER)}
+        # 섹션 순서는 화면이 관리하므로 받은 순서 그대로 저장
         item_list = list(req.items)
-        item_list.sort(key=lambda x: order_idx.get(x.section, 99))
 
         doc = DocxDocument()
         # 제목 문단
