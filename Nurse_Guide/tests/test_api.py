@@ -28,6 +28,7 @@ TMP = tempfile.TemporaryDirectory()
 for _f in SAMPLES:
     shutil.copy2(os.path.join(REAL_DATA, _f), TMP.name)
 os.environ["NURSE_DATA_DIR"] = TMP.name
+os.environ["NURSE_ALLOWED_HOSTS"] = "testserver"   # TestClient 의 기본 Host
 sys.path.insert(0, NG_DIR)
 
 import backend  # noqa: E402
@@ -506,6 +507,28 @@ class TestHardening(ApiCase):
         self.assertEqual(self.c.post("/api/embed", json={"texts": ["t" * 8000] * 64}).status_code, 503)
         self.assertEqual(self.c.post("/api/embed", json={"texts": ["t"] * 65}).status_code, 400)
         self.assertEqual(self.c.post("/api/embed", json={"texts": ["t" * 8001]}).status_code, 400)
+
+
+class TestHostCheck(ApiCase):
+    """DNS 리바인딩 방어 — 허용된 Host 로 들어온 요청만 처리."""
+
+    def test_unknown_host_rejected(self):
+        for path in ("/", "/api/docs", "/api/load-data", "/health"):
+            r = self.c.get(path, headers={"Host": "evil.example"})
+            self.assertEqual(r.status_code, 400, path)
+            self.assertIn("error", r.json())
+
+    def test_default_and_configured_hosts(self):
+        for host in ("localhost:8001", "127.0.0.1:8001", "[::1]:8001", "testserver"):
+            self.assertEqual(self.c.get("/health", headers={"Host": host}).status_code, 200, host)
+        with mock.patch.dict(os.environ, {"NURSE_ALLOWED_HOSTS": "nurse-guide.internal, 10.0.0.5"}):
+            self.assertEqual(self.c.get("/health", headers={"Host": "nurse-guide.internal:8001"}).status_code, 200)
+            self.assertEqual(self.c.get("/health", headers={"Host": "10.0.0.5:8001"}).status_code, 200)
+            self.assertEqual(self.c.get("/health", headers={"Host": "testserver"}).status_code, 400)
+
+    def test_wildcard_allows_any(self):
+        with mock.patch.dict(os.environ, {"NURSE_ALLOWED_HOSTS": "*"}):
+            self.assertEqual(self.c.get("/health", headers={"Host": "anything.example"}).status_code, 200)
 
 
 if __name__ == "__main__":

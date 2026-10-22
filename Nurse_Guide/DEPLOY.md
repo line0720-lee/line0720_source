@@ -29,7 +29,9 @@ pip install -r requirements.txt
 |---|---|---|---|
 | `NURSE_ADMIN_PASSWORD` | 쓰기 기능에 필수 | (없음) | 자료 등록·수정·삭제, 분류 변경용 관리자 비밀번호. 없으면 쓰기 API가 503 |
 | `NURSE_DATA_DIR` | 선택 | `Nurse_Guide\Data` | 규정·지침 파일과 `_meta.json`이 저장되는 폴더 |
-| `NURSE_PORT` | 선택 | `8001` | 서버 포트 (모든 네트워크 주소 0.0.0.0 에서 대기) |
+| `NURSE_PORT` | 선택 | `8001` | 서버 포트 |
+| `NURSE_HOST` | 선택 | `0.0.0.0` | 대기 주소. 같은 PC에서만 쓸 때는 `127.0.0.1` |
+| `NURSE_ALLOWED_HOSTS` | **운영 서버에 필수** | (로컬만) | 접속에 쓰는 서버 이름·IP를 쉼표로 (예: `서버이름,서버IP`). localhost·127.0.0.1은 항상 허용. 목록에 없는 주소로 접속하면 400 "허용되지 않은 접속 주소입니다" — DNS 리바인딩 방어 |
 
 - 읽기·질문 API(화면, 자동 로딩, 자료 목록, 질문)는 인증 없이 동작합니다.
 - 비밀번호가 틀리면 약 1초 늦게 401(관리자 인증이 필요합니다)로 응답합니다(무차별 대입 완화).
@@ -43,7 +45,7 @@ pip install -r requirements.txt
 ## 6. 실행
 ```powershell
 cd Nurse_Guide
-$env:NURSE_ADMIN_PASSWORD="(관리자 비밀번호)"; python backend.py
+$env:NURSE_ADMIN_PASSWORD="(관리자 비밀번호)"; $env:NURSE_ALLOWED_HOSTS="(서버이름),(서버IP)"; python backend.py
 ```
 - 접속: `http://서버:8001/` (포트를 바꿨다면 그 포트)
 - 상태 확인: `http://서버:8001/health` → `{"status":"ok"}`
@@ -51,6 +53,8 @@ $env:NURSE_ADMIN_PASSWORD="(관리자 비밀번호)"; python backend.py
 ## 7. 포트·방화벽
 - Windows 방화벽에서 사용하는 포트(기본 8001) TCP 인바운드를 사내망에만 허용합니다.
 - 외부(인터넷)에 직접 공개하지 않습니다.
+- 질문·임베딩 API(`/api/chat`, `/api/embed`)는 문서 규칙상 인증 없이 열려 있어, 사내망 누구나 공유 GPU 게이트웨이를 호출할 수 있습니다.
+  입력 길이 제한과 Host 검사는 있지만 호출 횟수 제한은 없으므로, 방화벽에서 접속 대역을 간호부 PC로 좁히는 것을 권장합니다.
 
 ## 8. 백업
 - 백업 대상: `Data\` 폴더 전체 (규정·지침 파일 + 분류·문서명·개정일·등록자 정보)

@@ -71,6 +71,26 @@ async def limit_upload_size(request: Request, call_next):
     return await call_next(request)
 
 
+DEFAULT_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
+
+
+def allowed_hosts():
+    """허용 Host 목록 = 기본(로컬) + NURSE_ALLOWED_HOSTS(쉼표 구분, '*'는 전부 허용). .env 반영을 위해 요청마다 읽는다."""
+    extra = {h.strip().lower() for h in os.environ.get("NURSE_ALLOWED_HOSTS", "").split(",") if h.strip()}
+    return DEFAULT_HOSTS | extra
+
+
+@app.middleware("http")
+async def check_host(request: Request, call_next):
+    """DNS 리바인딩 방어: 허용되지 않은 Host 헤더로 온 요청은 처리하지 않는다."""
+    host = (request.headers.get("host") or "").strip().lower()
+    name = host.split("]")[0] + "]" if host.startswith("[") else host.split(":")[0]   # 포트 제거 (IPv6 는 [..] 유지)
+    hosts = allowed_hosts()
+    if "*" not in hosts and name not in hosts:
+        return JSONResponse(status_code=400, content={"error": "허용되지 않은 접속 주소입니다 (NURSE_ALLOWED_HOSTS)."})
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3003", "http://127.0.0.1:3003"],
@@ -680,4 +700,4 @@ async def health():
 if __name__ == "__main__":
     import uvicorn
     load_env_file()
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("NURSE_PORT", PORT)))
+    uvicorn.run(app, host=os.environ.get("NURSE_HOST", "0.0.0.0"), port=int(os.environ.get("NURSE_PORT", PORT)))
