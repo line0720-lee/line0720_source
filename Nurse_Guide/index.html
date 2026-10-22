@@ -1,0 +1,1870 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>간호도우미</title>
+  <style>
+    /* ── 토큰 ──────────────────────────────── */
+    :root {
+      --bg:           #EEF2F7;
+      --surface:      #FFFFFF;
+      --header:       #1C2B3A;
+      --header-b:     #243447;
+      --accent:       #2563EB;
+      --accent-h:     #1D4ED8;
+      --user-bg:      #2563EB;
+      --user-txt:     #FFFFFF;
+      --bot-bg:       #FFFFFF;
+      --bot-shadow:   0 1px 4px rgba(0,0,0,.09);
+      --sys-bg:       #E2E8F0;
+      --sys-txt:      #475569;
+      --text:         #1E293B;
+      --muted:        #64748B;
+      --border:       #DDE3EB;
+      --fbar:         #F8FAFC;
+      --input-bg:     #FFFFFF;
+      --cite-bg:      #DBEAFE;
+      --cite-txt:     #1D4ED8;
+      --ret-bg:       #F0F6FF;
+      --ret-border:   #BFDBFE;
+      --online:       #22C55E;
+      --offline:      #EF4444;
+      --checking:     #F59E0B;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg:         #0D1520;
+        --surface:    #162030;
+        --header:     #0D1520;
+        --header-b:   #1A2B3D;
+        --accent:     #3B82F6;
+        --accent-h:   #60A5FA;
+        --user-bg:    #2563EB;
+        --user-txt:   #FFFFFF;
+        --bot-bg:     #1C2D40;
+        --bot-shadow: 0 1px 4px rgba(0,0,0,.4);
+        --sys-bg:     #1C2D40;
+        --sys-txt:    #94A3B8;
+        --text:       #E2E8F0;
+        --muted:      #94A3B8;
+        --border:     #243447;
+        --fbar:       #111D2B;
+        --input-bg:   #162030;
+        --cite-bg:    #1E3A5F;
+        --cite-txt:   #93C5FD;
+        --ret-bg:     #162030;
+        --ret-border: #1E3A5F;
+      }
+    }
+    :root[data-theme="light"] {
+      --bg:#EEF2F7;--surface:#FFFFFF;--header:#1C2B3A;--header-b:#243447;
+      --accent:#2563EB;--accent-h:#1D4ED8;--user-bg:#2563EB;--user-txt:#FFFFFF;
+      --bot-bg:#FFFFFF;--bot-shadow:0 1px 4px rgba(0,0,0,.09);
+      --sys-bg:#E2E8F0;--sys-txt:#475569;--text:#1E293B;--muted:#64748B;
+      --border:#DDE3EB;--fbar:#F8FAFC;--input-bg:#FFFFFF;
+      --cite-bg:#DBEAFE;--cite-txt:#1D4ED8;--ret-bg:#F0F6FF;--ret-border:#BFDBFE;
+      --online:#22C55E;--offline:#EF4444;--checking:#F59E0B;
+    }
+    :root[data-theme="dark"] {
+      --bg:#0D1520;--surface:#162030;--header:#0D1520;--header-b:#1A2B3D;
+      --accent:#3B82F6;--accent-h:#60A5FA;--user-bg:#2563EB;--user-txt:#FFFFFF;
+      --bot-bg:#1C2D40;--bot-shadow:0 1px 4px rgba(0,0,0,.4);
+      --sys-bg:#1C2D40;--sys-txt:#94A3B8;--text:#E2E8F0;--muted:#94A3B8;
+      --border:#243447;--fbar:#111D2B;--input-bg:#162030;
+      --cite-bg:#1E3A5F;--cite-txt:#93C5FD;--ret-bg:#162030;--ret-border:#1E3A5F;
+      --online:#22C55E;--offline:#EF4444;--checking:#F59E0B;
+    }
+
+    /* ── 리셋 ───────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Noto Sans KR', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── 헤더 ───────────────────────────────── */
+    header {
+      background: var(--header);
+      border-bottom: 1px solid var(--header-b);
+      padding: 0 20px;
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      gap: 12px;
+    }
+    .h-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .h-left > div:last-child { min-width: 0; }
+    .h-logo {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: var(--accent); display: flex; align-items: center;
+      justify-content: center; font-size: 1.1rem; flex-shrink: 0;
+      cursor: pointer; transition: transform .12s, filter .12s;
+    }
+    .h-logo:hover  { filter: brightness(1.15); }
+    .h-logo:active { transform: scale(.92); }
+    .h-title { font-size: .98rem; font-weight: 700; color: #F0F6FF; line-height: 1.2; white-space: nowrap; }
+    .h-sub   { font-size: .7rem; color: #7A9AC0; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .h-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+    .status {
+      display: flex; align-items: center; gap: 7px;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 20px; padding: 4px 12px;
+      font-size: .75rem; color: #A0B4CC; white-space: nowrap;
+    }
+    .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--checking); flex-shrink: 0;
+    }
+    .dot.online  { background: var(--online);  box-shadow: 0 0 5px #22C55E88; }
+    .dot.offline { background: var(--offline); box-shadow: 0 0 5px #EF444488; }
+    .dot.checking{ animation: pulse 1.1s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+
+
+    /* ── 진행바 ─────────────────────────────── */
+    .pbar-wrap { height: 2px; background: var(--border); flex-shrink: 0; display: none; }
+    .pbar-wrap.on { display: block; }
+    .pbar { height: 100%; background: var(--accent); transition: width .18s ease; width: 0; }
+
+    /* ── 채팅 영역 ──────────────────────────── */
+    .chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 16px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      scroll-behavior: smooth;
+    }
+    .chat::-webkit-scrollbar { width: 5px; }
+    .chat::-webkit-scrollbar-track { background: transparent; }
+    .chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ── 메시지 ─────────────────────────────── */
+    .msg { display: flex; gap: 8px; align-items: flex-start; max-width: 84%; }
+    .msg.user   { align-self: flex-end;   flex-direction: row-reverse; }
+    .msg.bot    { align-self: flex-start; }
+    .msg.system { align-self: center; max-width: 100%; }
+
+    .avatar {
+      width: 30px; height: 30px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .85rem; flex-shrink: 0; margin-top: 2px;
+    }
+    .avatar.bot  { background: #DBEAFE; }
+    .avatar.user { background: #E0E7FF; color: var(--accent); }
+
+    .bubble {
+      padding: 10px 14px;
+      border-radius: 18px;
+      font-size: .9rem;
+      line-height: 1.72;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+    .msg.user  .bubble { background: var(--user-bg); color: var(--user-txt); border-bottom-right-radius: 5px; }
+    .msg.bot   .bubble { background: var(--bot-bg);  color: var(--text);     border-bottom-left-radius: 5px; box-shadow: var(--bot-shadow); }
+    .msg.system .bubble {
+      background: var(--sys-bg); color: var(--sys-txt);
+      font-size: .74rem; padding: 5px 13px; border-radius: 12px;
+    }
+
+    /* ── 출처 태그 ──────────────────────────── */
+    .cite {
+      display: inline-block;
+      background: var(--cite-bg); color: var(--cite-txt);
+      border-radius: 4px; padding: 1px 5px;
+      font-size: .76rem; font-weight: 700; margin: 0 1px;
+      cursor: pointer; transition: filter .12s;
+    }
+    .cite:hover { filter: brightness(.94); text-decoration: underline; }
+
+    /* ── 예시 질문 버튼 (첫 인사 아래) ───────── */
+    .ex-qs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+    .ex-q {
+      border: 1px solid var(--border); border-radius: 999px;
+      background: var(--surface); color: var(--accent);
+      padding: 4px 11px; font-size: .76rem; font-family: inherit;
+      cursor: pointer; text-align: left; line-height: 1.4;
+      transition: border-color .12s, background .12s;
+    }
+    .ex-q:hover { border-color: var(--accent); background: var(--cite-bg); }
+
+    /* ── 참고 구간 (봇 메시지 하단) ─────────── */
+    .ret-wrap { margin-top: 5px; }
+    .ret-btn {
+      background: none; border: none; cursor: pointer;
+      font-size: .72rem; color: var(--accent); padding: 2px 0;
+      display: flex; align-items: center; gap: 3px;
+    }
+    .ret-btn:hover { color: var(--accent-h); }
+    .ret-panel {
+      display: none;
+      margin-top: 4px;
+      background: var(--ret-bg); border: 1px solid var(--ret-border);
+      border-radius: 8px; padding: 7px 10px;
+      font-size: .72rem; color: var(--muted);
+    }
+    .ret-panel.open { display: block; }
+    .ret-row { padding: 2px 4px; border-bottom: 1px solid var(--ret-border); border-radius: 4px; transition: background .15s; }
+    .ret-row:last-child { border-bottom: none; }
+    .ret-row.hl { background: var(--cite-bg); outline: 2px solid var(--accent); outline-offset: -1px; }
+    .ret-src   { font-weight: 700; color: var(--accent); word-break: break-word; }
+    .ret-score { color: var(--muted); margin-left: 5px; white-space: nowrap; }
+
+    /* ── 타이핑 인디케이터 ──────────────────── */
+    .typing { display: flex; align-items: center; gap: 3px; padding: 2px 0; }
+    .typing span {
+      display: inline-block; width: 6px; height: 6px;
+      border-radius: 50%; background: var(--muted);
+      animation: bounce .9s ease-in-out infinite;
+    }
+    .typing span:nth-child(2) { animation-delay: .17s; }
+    .typing span:nth-child(3) { animation-delay: .34s; }
+    @keyframes bounce {
+      0%,80%,100% { transform: translateY(0); }
+      40%         { transform: translateY(-6px); }
+    }
+
+    /* ── 입력 영역 ──────────────────────────── */
+    .input-area {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 10px 14px 6px;
+      flex-shrink: 0;
+    }
+    .input-wrap {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+    }
+    .input-note { font-size: .68rem; color: var(--muted); margin-top: 5px; text-align: center; }
+    #question {
+      flex: 1; min-width: 0; min-height: 40px; max-height: 130px;
+      border: 1px solid var(--border); border-radius: 12px;
+      padding: 9px 13px; font-size: .9rem; font-family: inherit;
+      resize: none; outline: none; overflow-y: auto;
+      background: var(--input-bg); color: var(--text);
+      line-height: 1.55; transition: border-color .15s;
+    }
+    #question:focus { border-color: var(--accent); }
+    #question::placeholder { color: var(--muted); }
+    #sendBtn {
+      width: 40px; height: 40px; border-radius: 50%;
+      border: none; background: var(--accent); color: #fff;
+      font-size: 1rem; cursor: pointer; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .12s, transform .1s;
+    }
+    #sendBtn:hover:not(:disabled) { background: var(--accent-h); }
+    #sendBtn:active:not(:disabled) { transform: scale(.91); }
+    #sendBtn:disabled { background: #93C5FD; cursor: not-allowed; opacity: .7; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+
+    /* ── 헤더 버튼 (미답변 / 자료 관리) ─────── */
+    .edit-btn {
+      display: flex; align-items: center; gap: 5px;
+      background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18);
+      border-radius: 8px; padding: 5px 11px;
+      font-size: .78rem; font-weight: 600; color: #D0E4FF;
+      cursor: pointer; white-space: nowrap;
+      transition: background .12s;
+    }
+    .edit-btn:hover { background: rgba(255,255,255,.18); }
+
+    /* ── 모달 오버레이 ───────────────────────── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.6); z-index: 1000;
+      align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .modal-overlay.open { display: flex; }
+
+    @keyframes modal-in {
+      from { opacity: 0; transform: translateY(-14px) scale(.97); }
+      to   { opacity: 1; transform: none; }
+    }
+
+    .modal {
+      background: var(--surface); border-radius: 16px;
+      width: 100%; max-width: 860px;
+      max-height: 88vh;
+      box-shadow: 0 24px 60px rgba(0,0,0,.35);
+      display: flex; flex-direction: column;
+      animation: modal-in .18s ease;
+    }
+
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 24px; border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .modal-title { font-size: 1.05rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
+    .modal-close {
+      width: 32px; height: 32px; border-radius: 50%; border: none;
+      background: var(--bg); color: var(--muted); font-size: 1rem;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: background .12s;
+    }
+    .modal-close:hover { background: var(--border); color: var(--text); }
+
+    .modal-toolbar {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+      padding: 12px 24px; border-bottom: 1px solid var(--border);
+      flex-shrink: 0; background: var(--fbar, var(--bg));
+    }
+    .modal-body {
+      flex: 1; overflow-y: auto; padding: 18px 24px;
+      display: flex; flex-direction: column; gap: 12px;
+      min-height: 0;
+    }
+    .modal-footer {
+      display: flex; align-items: center; justify-content: flex-end;
+      gap: 10px; padding: 14px 24px;
+      border-top: 1px solid var(--border); flex-shrink: 0;
+      background: var(--fbar, var(--bg));
+      border-radius: 0 0 16px 16px;
+    }
+    .modal-footer-status { font-size: .76rem; color: var(--muted); margin-right: auto; min-width: 0; word-break: break-word; }
+
+    /* 관리자 인증 (쓰기 요청이 401/503일 때만 표시) */
+    .admin-auth { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+    .admin-auth .form-input { width: 170px; padding: 6px 10px; font-size: .82rem; }
+    .admin-msg { font-size: .74rem; color: var(--muted); }
+    .admin-msg.err { color: #EF4444; }
+
+    /* 분류 그룹 */
+    .sec-group { display: flex; flex-direction: column; gap: 6px; }
+    .sec-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 2px 0 4px; border-bottom: 1px solid var(--border); margin-bottom: 2px;
+    }
+    .sec-label { font-size: .75rem; font-weight: 700; color: var(--accent); letter-spacing: .04em; }
+    .sec-empty { font-size: .78rem; color: var(--muted); padding: 6px 2px; }
+
+    /* 분류 관리 패널 */
+    .sp-list {
+      display: flex; flex-direction: column; gap: 2px;
+      max-height: 280px; overflow-y: auto;
+      border: 1px solid var(--border); border-radius: 8px; padding: 4px;
+    }
+    .sp-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; }
+    .sp-row:hover, .sp-row.editing { background: var(--bg); }
+    .sp-num { font-weight: 700; color: var(--accent); font-size: .85rem; min-width: 48px; flex-shrink: 0; }
+    .sp-label { flex: 1; min-width: 0; font-size: .85rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sp-count { font-size: .72rem; color: var(--muted); flex-shrink: 0; }
+    .sp-input { flex: 1; min-width: 0; padding: 4px 8px; font-size: .82rem; }
+    .sp-add { display: flex; align-items: center; gap: 8px; }
+    .sp-add .sp-num { font-size: 1rem; min-width: 0; }
+    .sp-add .form-input { flex: 1; min-width: 0; }
+
+    /* 자료 행 */
+    .doc-row {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+      padding: 9px 12px; border: 1px solid var(--border);
+      border-radius: 10px; background: var(--surface);
+    }
+    .doc-row:hover { background: var(--bg); }
+    .doc-info { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .doc-title { font-size: .88rem; font-weight: 600; color: var(--text); line-height: 1.4; word-break: break-word; }
+    .doc-meta { font-size: .74rem; color: var(--muted); word-break: break-word; }
+    .doc-meta.err { color: #EF4444; }
+    .doc-actions { display: flex; gap: 5px; flex-shrink: 0; margin-left: auto; }
+    .qna-btn {
+      border: 1px solid var(--border); border-radius: 6px; padding: 3px 9px;
+      font-size: .72rem; font-weight: 600; cursor: pointer;
+      background: var(--surface); color: var(--muted);
+      transition: all .12s;
+    }
+    .qna-btn:disabled { opacity: .5; cursor: wait; }
+    .qna-btn.edit:hover  { border-color: var(--accent); color: var(--accent); }
+    .qna-btn.del:hover   { border-color: #EF4444; color: #EF4444; }
+
+    /* 편집 폼 */
+    .edit-form {
+      border: 2px solid var(--accent); border-radius: 10px;
+      padding: 14px; background: var(--surface);
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .form-title { font-size: .82rem; font-weight: 700; color: var(--accent); display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .form-grid .full { grid-column: 1 / -1; }
+    .form-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .form-label { font-size: .72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .form-label .req { color: #EF4444; }
+    .form-select, .form-input {
+      border: 1px solid var(--border); border-radius: 7px;
+      padding: 7px 10px; font-size: .88rem; font-family: inherit;
+      background: var(--input-bg); color: var(--text); outline: none;
+      transition: border-color .12s; width: 100%;
+    }
+    .form-select:focus, .form-input:focus { border-color: var(--accent); }
+    .form-hint { font-size: .7rem; color: var(--muted); }
+
+    .form-btns { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* 버튼 공용 */
+    .btn {
+      border: none; border-radius: 8px; padding: 7px 16px;
+      font-size: .82rem; font-weight: 600; cursor: pointer;
+      transition: opacity .12s, transform .1s;
+    }
+    .btn:active { transform: scale(.96); }
+    .btn:disabled { opacity: .55; cursor: wait; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { opacity: .88; }
+    .btn-ghost { background: var(--bg); color: var(--muted); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: var(--border); }
+    .btn-danger { background: #FEF2F2; color: #EF4444; border: 1px solid #FCA5A5; }
+
+    .badge-cnt {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: #DBEAFE; color: #1D4ED8;
+      border-radius: 10px; padding: 1px 7px; font-size: .7rem; font-weight: 700;
+    }
+    .badge-red {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: #FEE2E2; color: #DC2626;
+      border-radius: 10px; padding: 1px 6px; font-size: .68rem; font-weight: 700;
+      margin-left: 4px;
+    }
+
+    /* ── 미답변 목록 ───────────────────────── */
+    .ua-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 14px; border: 1px solid var(--border);
+      border-radius: 8px; background: var(--surface);
+    }
+    .ua-meta { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+    .ua-time { font-size: .7rem; color: var(--muted); }
+    .ua-q    { font-size: .88rem; color: var(--text); line-height: 1.5; word-break: break-word; }
+    .ua-del  { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 1rem; padding: 2px 4px; flex-shrink: 0; }
+    .ua-del:hover { color: #EF4444; }
+
+    /* ── 모바일 (≤480px) ─────────────────────── */
+    @media (max-width: 480px) {
+      header { padding: 0 10px; gap: 8px; }
+      .h-left { gap: 8px; }
+      .h-right { gap: 6px; }
+      .edit-btn { padding: 5px 8px; gap: 2px; }
+      .edit-btn .btn-label { display: none; }
+      .status { padding: 3px 8px; gap: 5px; font-size: .66rem; }
+
+      .chat { padding: 14px 10px 8px; }
+      .msg { max-width: 94%; }
+      .input-area { padding: 8px 10px 5px; }
+      #question { font-size: .86rem; }
+
+      .modal-overlay { padding: 0; }
+      .modal { max-width: none !important; max-height: none; height: 100%; border-radius: 0; }
+      .modal-header { padding: 12px 14px; }
+      .modal-toolbar, .modal-body { padding: 10px 14px; }
+      .modal-footer { padding: 10px 14px; border-radius: 0; }
+      .admin-auth { margin-left: 0; width: 100%; }
+      .admin-auth .form-input { flex: 1; width: auto; min-width: 0; }
+
+      .form-grid { grid-template-columns: 1fr; }
+      .sp-row { flex-wrap: wrap; }
+      .sp-add { flex-wrap: wrap; }
+      .sp-add .btn { width: 100%; }
+      .doc-actions { width: 100%; justify-content: flex-end; }
+    }
+    @media (max-width: 360px) {
+      #statusText { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- 백엔드 주소 — 여기 한 곳만 수정 -->
+<!-- 운영 서버가 이 파일을 서빙하면(포트·프록시 무관) 같은 오리진을 쓰고, 로컬 정적 서버(:3003)나 파일로 열면 로컬 백엔드(:8001)로 붙는다 (운영 서버 주소는 아직 없음) -->
+<script>const BE = (location.port === "3003" || location.protocol === "file:") ? "http://127.0.0.1:8001" : location.origin;</script>
+
+<!-- ── 헤더 ── -->
+<header>
+  <div class="h-left">
+    <div class="h-logo" onclick="location.reload()" title="새로고침" role="button">🩺</div>
+    <div>
+      <div class="h-title">간호도우미</div>
+      <div class="h-sub">간호부 규정·지침 RAG 챗봇</div>
+    </div>
+  </div>
+  <div class="h-right">
+    <button class="edit-btn" onclick="openUnansweredModal()" id="unansweredBtn" title="미답변 키워드">❓<span class="btn-label">미답변</span><span class="badge-red" id="unansweredBadge" style="display:none">0</span></button>
+    <button class="edit-btn" onclick="openDocs()" id="docsBtn" title="자료 관리">📚<span class="btn-label">자료 관리</span></button>
+    <div class="status">
+      <div class="dot checking" id="dot"></div>
+      <span id="statusText">확인 중…</span>
+    </div>
+  </div>
+</header>
+
+<!-- ── 자료 관리 모달 ── -->
+<div class="modal-overlay" id="docsOverlay">
+  <div class="modal" id="docsModal">
+
+    <div class="modal-header">
+      <div class="modal-title">
+        📚 자료 관리
+        <span class="badge-cnt" id="docsCount">0</span>
+      </div>
+      <button class="modal-close" onclick="closeDocs()" title="닫기">✕</button>
+    </div>
+
+    <div class="modal-toolbar">
+      <button class="btn btn-primary" id="docAddBtn" onclick="showDocAddForm()">＋ 자료 등록</button>
+      <button class="btn btn-ghost" id="catPanelBtn" onclick="showCategoryPanel()">📁 분류 관리</button>
+      <div class="admin-auth" id="adminAuth" style="display:none">
+        <input type="password" class="form-input" id="adminPw" placeholder="관리자 비밀번호" autocomplete="current-password" />
+        <button class="btn btn-primary" id="adminPwBtn" onclick="submitAdminPw()">확인</button>
+        <span class="admin-msg" id="adminAuthMsg"></span>
+      </div>
+    </div>
+
+    <div class="modal-body" id="docsBody">
+      <div style="text-align:center;padding:40px;color:var(--muted)">불러오는 중…</div>
+    </div>
+
+    <div class="modal-footer">
+      <span class="modal-footer-status" id="docsStatus"></span>
+      <button class="btn btn-ghost" id="docsCloseBtn" onclick="closeDocs()">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 미답변 키워드 모달 ── -->
+<div class="modal-overlay" id="unansweredOverlay">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-header">
+      <div class="modal-title">❓ 미답변 키워드 목록 <span class="badge-cnt" id="unansweredCount">0</span></div>
+      <button class="modal-close" onclick="closeUnansweredModal()">✕</button>
+    </div>
+    <div class="modal-body" id="unansweredBody" style="gap:8px">
+      <div style="text-align:center;padding:40px;color:var(--muted)">미답변 항목이 없습니다.</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" onclick="clearAllUnanswered()" style="margin-right:auto">🗑️ 전체 삭제</button>
+      <button class="btn btn-ghost" onclick="closeUnansweredModal()">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 폴더 바 제거됨 — 백엔드가 Data 폴더를 자동 로딩 -->
+
+<!-- ── 진행바 ── -->
+<div class="pbar-wrap" id="pbarWrap"><div class="pbar" id="pbar"></div></div>
+
+<!-- ── 채팅 ── -->
+<div class="chat" id="chat"></div>
+
+<!-- ── 입력 ── -->
+<div class="input-area">
+  <div class="input-wrap">
+    <textarea id="question" rows="1"
+      placeholder="예: 고위험 약물 투약 전 확인 절차는?"
+      title="Enter 전송 · Shift+Enter 줄바꿈"
+      onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+    <button id="sendBtn" onclick="sendChat()" title="전송 (Enter)">↑</button>
+  </div>
+  <div class="input-note">※ 환자 이름·등록번호 등 개인정보는 입력하지 마세요.</div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════
+   설정
+════════════════════════════════════════════ */
+const TOP_K          = 4;
+const EMBED_BATCH    = 16;
+const MAX_UPLOAD_MB  = 30;
+const MAX_CATEGORIES = 99;
+const ADMIN_PW_KEY   = 'nurse_admin_pw';   // sessionStorage — 탭을 닫으면 사라짐
+const UNANSWERED_PHRASE = '규정에서 확인되지 않습니다';
+const EXAMPLE_QUESTIONS = [
+  '투약 확인 절차는 어떻게 되나요?',
+  '가상약A는 어떻게 희석하나요?',
+  '손위생은 언제 해야 하나요?',
+];
+
+/* ════════════════════════════════════════════
+   전역 상태
+════════════════════════════════════════════ */
+let vectorStore = null;
+let docNames    = [];   // 마지막 autoLoadData 기준 문서명 — 긴 이름 우선 (출처 태그 판별용)
+let msgCount    = 0;
+
+const chatEl = document.getElementById('chat');
+const sleep  = ms => new Promise(r => setTimeout(r, ms));
+
+/* ════════════════════════════════════════════
+   건강 확인
+════════════════════════════════════════════ */
+async function checkHealth() {
+  const dot = document.getElementById('dot');
+  const txt = document.getElementById('statusText');
+  try {
+    const res = await fetch(BE + '/health', { signal: AbortSignal.timeout(4000) });
+    if (res.ok) { dot.className = 'dot online';  txt.textContent = '백엔드 연결됨'; }
+    else throw 0;
+  } catch {
+    dot.className = 'dot offline';
+    txt.textContent = '연결 안 됨';
+  }
+}
+checkHealth();
+
+/* ════════════════════════════════════════════
+   메시지 헬퍼
+════════════════════════════════════════════ */
+function appendMsg(role, html) {
+  const id  = 'msg-' + (++msgCount);
+  const div = document.createElement('div');
+  div.id    = id;
+  div.className = 'msg ' + role;
+
+  if (role === 'user') {
+    div.innerHTML = `
+      <div class="avatar user">👤</div>
+      <div class="bubble">${escHtml(html)}</div>`;
+  } else if (role === 'bot') {
+    div.innerHTML = `
+      <div class="avatar bot">🤖</div>
+      <div style="min-width:0;flex:1" id="${id}-wrap">
+        <div class="bubble" id="${id}-b">${html}</div>
+        <div class="ret-wrap" id="${id}-ret" style="display:none"></div>
+      </div>`;
+  } else {
+    div.innerHTML = `<div class="bubble">${html}</div>`;
+  }
+
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return id;
+}
+
+function updateBubble(id, html) {
+  const el = document.getElementById(id + '-b')
+           ?? document.getElementById(id)?.querySelector('.bubble');
+  if (!el) return;
+  el.innerHTML = html;
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+/* 참고 구간 목록 — 행마다 문서·조항·쪽을 data-* 로 달아 두고 출처 태그 클릭 시 찾아간다 */
+function showRetrieval(id, hits) {
+  const wrap = document.getElementById(id + '-ret');
+  if (!wrap || !hits.length) return;
+  const rows = hits.map((h, i) => {
+    const c = h.chunk;
+    return `<div class="ret-row" data-doc="${escHtml(c.doc || c.file)}" data-article="${escHtml(c.article)}"`
+         + ` data-ps="${escHtml(c.page_start)}" data-pe="${escHtml(c.page_end)}">`
+         + `<span class="ret-src">[${i+1}] ${escHtml(chunkLabel(c))}</span>`
+         + `<span class="ret-score">${(h.score*100).toFixed(1)}%</span></div>`;
+  }).join('');
+  wrap.style.display = 'block';
+  wrap.innerHTML = `
+    <button class="ret-btn" onclick="toggleRet('${id}')">📎 참고 구간 ${hits.length}건 ▾</button>
+    <div class="ret-panel" id="${id}-rp">${rows}</div>`;
+}
+
+// forceOpen 이면 닫혀 있을 때만 연다 (출처 태그 클릭)
+function toggleRet(id, forceOpen) {
+  const p = document.getElementById(id + '-rp');
+  if (!p) return;
+  let open;
+  if (forceOpen) { p.classList.add('open'); open = true; }
+  else open = p.classList.toggle('open');
+  const btn  = document.querySelector(`#${id}-ret .ret-btn`);
+  if (btn) btn.textContent = `📎 참고 구간 ${p.children.length}건 ${open ? '▴' : '▾'}`;
+}
+
+// 속성값(value="…", title="…", data-*="…")에도 쓰이므로 따옴표까지 이스케이프
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+          .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* 출처 태그 — [문서명 제N조] / [문서명 p.N] / [문서명 제목]
+   대괄호 안이 '불러온 문서명'으로 시작할 때만 태그로 만든다 (이스케이프된 텍스트끼리 비교) */
+function highlightCites(raw) {
+  const names = docNames.map(escHtml);
+  return escHtml(raw)
+    .replace(/\n/g, '<br>')
+    .replace(/\[([^\[\]<>]+)\]/g, (m, content) =>
+      names.some(n => content.startsWith(n))
+        ? `<span class="cite" data-cite="${content}">[${content}]</span>`
+        : m);
+}
+
+/* ════════════════════════════════════════════
+   출처 태그 클릭 → 참고 구간 펼치고 해당 행 강조
+════════════════════════════════════════════ */
+function normArticle(s) { return String(s || '').replace(/\s+/g, ''); }
+
+function findCitedRow(rows, cite) {
+  const doc = docNames.find(n => cite.startsWith(n));
+  if (!doc) return null;
+  const rest = cite.slice(doc.length);
+  const sameDoc = rows.filter(r => r.dataset.doc === doc);
+  const art = rest.match(/제\s*(\d+)\s*조/);
+  if (art) {
+    const key = `제${art[1]}조`;
+    const hit = sameDoc.find(r => normArticle(r.dataset.article).startsWith(key));
+    if (hit) return hit;
+  }
+  const pg = rest.match(/p\.?\s*(\d+)/i);
+  if (pg) {
+    const p = Number(pg[1]);
+    const hit = sameDoc.find(r => {
+      const ps = Number(r.dataset.ps), pe = r.dataset.pe ? Number(r.dataset.pe) : ps;
+      return r.dataset.ps !== '' && p >= ps && p <= pe;
+    });
+    if (hit) return hit;
+  }
+  return sameDoc[0] || null;
+}
+
+chatEl.addEventListener('click', e => {
+  const cite = e.target.closest('.cite');
+  if (!cite) return;
+  const msg = cite.closest('.msg.bot');
+  if (!msg || !document.getElementById(msg.id + '-rp')) return;
+  toggleRet(msg.id, true);
+  const rows = [...msg.querySelectorAll('.ret-row')];
+  const row  = findCitedRow(rows, cite.dataset.cite || '');
+  chatEl.querySelectorAll('.ret-row.hl').forEach(r => r.classList.remove('hl'));
+  if (row) {
+    row.classList.add('hl');
+    row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+});
+
+/* ════════════════════════════════════════════
+   청크 라벨 — "문서명 · 조항(· part) · p.N(또는 p.N~M)"
+   (청킹은 서버 doc_parser 가 조항 단위로 수행)
+════════════════════════════════════════════ */
+function chunkLabel(c) {
+  const parts = [c.doc || c.file];
+  if (c.article) parts.push(c.article);
+  else if (c.lines) parts.push(`${c.lines}줄`);
+  if (c.part) parts.push(c.part);
+  if (c.page_start != null) {
+    parts.push(c.page_end != null && c.page_end !== c.page_start
+      ? `p.${c.page_start}~${c.page_end}` : `p.${c.page_start}`);
+  }
+  return parts.join(' · ');
+}
+
+/* 답변 근거로 보내는 구간 머리말 — 없는 항목은 빼고 " · "로 잇는다 */
+function contextHeader(i, c) {
+  const segs = [];
+  const doc = c.doc || c.file;
+  if (doc) segs.push(`문서: ${doc}`);
+  if (c.article) segs.push(c.article + (c.part ? ` (${c.part})` : ''));
+  else if (c.part) segs.push(c.part);
+  const ps = c.page_start, pe = c.page_end;
+  if (ps != null && ps !== '') segs.push(`p.${ps}${pe && pe !== ps ? '~' + pe : ''}`);
+  if (c.revised) segs.push(`개정일 ${c.revised}`);
+  return `[구간 ${i+1}] ${segs.join(' · ')}`;
+}
+
+/* ════════════════════════════════════════════
+   벡터 스토어
+════════════════════════════════════════════ */
+class VectorStore {
+  constructor() { this.chunks = []; this.vectors = []; }
+  add(c, v)  { this.chunks.push(c); this.vectors.push(v); }
+  _cos(a, b) {
+    let d=0,na=0,nb=0;
+    for (let i=0;i<a.length;i++){d+=a[i]*b[i];na+=a[i]*a[i];nb+=b[i]*b[i];}
+    return d/(Math.sqrt(na)*Math.sqrt(nb)+1e-8);
+  }
+  search(q, k=TOP_K) {
+    return this.chunks
+      .map((c,i)=>({chunk:c, score:this._cos(q,this.vectors[i])}))
+      .sort((a,b)=>b.score-a.score).slice(0,k);
+  }
+}
+
+/* ════════════════════════════════════════════
+   임베딩 API
+════════════════════════════════════════════ */
+async function embedTexts(texts) {
+  const res = await fetch(BE + '/api/embed', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({texts}),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `임베딩 오류 ${res.status}`);
+  }
+  return (await res.json()).embeddings;
+}
+
+/* ════════════════════════════════════════════
+   자동 데이터 로딩 (페이지 로드 시 + 자료 변경 후 호출)
+════════════════════════════════════════════ */
+async function autoLoadData() {
+  const pWrap = document.getElementById('pbarWrap');
+  const pBar  = document.getElementById('pbar');
+  pWrap.classList.add('on');
+  pBar.style.width = '5%';
+
+  const sysId = appendMsg('system', '📂 참고자료 자동 로딩 중…');
+
+  let files, chunks;
+  try {
+    const res = await fetch(BE + '/api/load-data');
+    if (!res.ok) throw new Error(`서버 오류 ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    files = data.files || [];
+    chunks = data.chunks || [];
+  } catch(err) {
+    updateBubble(sysId, `❌ 데이터 로딩 실패: ${escHtml(err.message)}`);
+    pWrap.classList.remove('on');
+    return;
+  }
+
+  /* 서버 청크(조항 단위) → 검색용 청크 */
+  let totalFiles = 0;
+  const names = new Set();
+  for (const f of files) {
+    if (f.error) { appendMsg('system', `⚠️ ${escHtml(f.filename)}: ${escHtml(f.error)}`); continue; }
+    totalFiles++;
+    if (f.doc) names.add(f.doc);
+  }
+  const allChunks = chunks.map(c => ({ ...c, display: c.text }));
+  allChunks.forEach(c => { const n = c.doc || c.file; if (n) names.add(n); });
+
+  if (!allChunks.length) {
+    vectorStore = null;
+    docNames = [];
+    updateBubble(sysId, '⚠️ Data 폴더에서 읽을 수 있는 파일이 없습니다. 📚 자료 관리에서 규정·지침 파일을 등록해 주세요.');
+    pWrap.classList.remove('on');
+    return;
+  }
+
+  /* 임베딩 — 다 만든 뒤에 교체해서, 재색인 중에도 이전 색인으로 질문할 수 있게 한다 */
+  const store = new VectorStore();
+  const total = allChunks.length;
+  try {
+    for (let i = 0; i < total; i += EMBED_BATCH) {
+      const batch = allChunks.slice(i, i + EMBED_BATCH);
+      const done  = Math.min(i + EMBED_BATCH, total);
+      pBar.style.width = Math.round(5 + (done / total) * 95) + '%';
+      updateBubble(sysId, `🔢 임베딩 중… (${done}/${total}청크)`);
+      const vecs = await embedTexts(batch.map(c => c.embed_text));
+      for (let j = 0; j < batch.length; j++) store.add(batch[j], vecs[j]);
+    }
+    vectorStore = store;
+    docNames = [...names].sort((a, b) => b.length - a.length);
+    pBar.style.width = '100%';
+    setTimeout(() => { pWrap.classList.remove('on'); pBar.style.width = '0'; }, 700);
+    updateBubble(sysId, `✅ 준비 완료 — ${totalFiles}개 파일 · ${total}개 청크 (bge-m3)`);
+    const botId = appendMsg('bot', '안녕하세요! 간호부 <b>간호도우미</b>입니다.\n간호 업무 규정·지침 관련 질문을 입력하거나 아래 예시를 눌러 보세요.');
+    appendExampleQuestions(botId);
+  } catch(err) {
+    updateBubble(sysId, `❌ 임베딩 실패: ${escHtml(err.message)}`);
+    vectorStore = null;
+    setTimeout(() => pWrap.classList.remove('on'), 600);
+  }
+}
+
+/* ════════════════════════════════════════════
+   예시 질문 버튼 (첫 인사 아래)
+════════════════════════════════════════════ */
+function appendExampleQuestions(botId) {
+  const wrap = document.getElementById(botId + '-wrap');
+  if (!wrap) return;
+  const box = document.createElement('div');
+  box.className = 'ex-qs';
+  EXAMPLE_QUESTIONS.forEach(q => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ex-q';
+    b.textContent = q;
+    b.addEventListener('click', () => askExample(q));
+    box.appendChild(b);
+  });
+  wrap.insertBefore(box, document.getElementById(botId + '-ret'));
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function askExample(q) {
+  if (document.getElementById('sendBtn').disabled) return;
+  const qEl = document.getElementById('question');
+  qEl.value = q;
+  autoResize(qEl);
+  sendChat();
+}
+
+/* ════════════════════════════════════════════
+   자동 리사이즈
+════════════════════════════════════════════ */
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 130)+'px';
+}
+
+/* ════════════════════════════════════════════
+   단축키
+════════════════════════════════════════════ */
+function handleKey(e) {
+  if (e.isComposing) return;   // 한글 조합 중 Enter는 무시 (마지막 글자 중복 전송 방지)
+  if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+}
+
+/* ════════════════════════════════════════════
+   전송 + RAG + SSE
+════════════════════════════════════════════ */
+async function sendChat() {
+  const qEl   = document.getElementById('question');
+  const sendBtn = document.getElementById('sendBtn');
+  const question = qEl.value.trim();
+  if (!question || sendBtn.disabled) return;
+  if (!vectorStore) {
+    appendMsg('system','⚠️ 참고자료가 아직 준비되지 않았습니다. 로딩이 끝난 뒤 다시 질문해 주세요.');
+    return;
+  }
+
+  qEl.value = '';
+  autoResize(qEl);
+  sendBtn.disabled = true;
+
+  appendMsg('user', question);
+
+  /* 질문 임베딩 + 검색 */
+  let hits;
+  try {
+    const [qVec] = await embedTexts([question]);
+    hits = vectorStore.search(qVec, TOP_K);
+  } catch(err) {
+    appendMsg('system', `⚠️ 임베딩 오류: ${escHtml(err.message)}`);
+    sendBtn.disabled = false;
+    return;
+  }
+
+  /* 컨텍스트 */
+  const context = hits.map((h,i) => `${contextHeader(i, h.chunk)}\n${h.chunk.display}`).join('\n\n');
+
+  /* 봇 버블 생성 */
+  const botId = appendMsg('bot', '<div class="typing"><span></span><span></span><span></span></div>');
+
+  /* SSE 스트리밍 */
+  try {
+    const res = await fetch(BE + '/api/chat', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ question, context }),
+    });
+    if (!res.ok) throw new Error(`서버 오류 ${res.status}`);
+
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf='', raw='', first=true;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream:true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const ln of lines) {
+        if (!ln.startsWith('data:')) continue;
+        const d = ln.slice(5).trim();
+        if (d==='[DONE]') break;
+        try {
+          const { token } = JSON.parse(d);
+          if (token) {
+            if (first) { raw=''; first=false; }
+            raw += token;
+            updateBubble(botId, highlightCites(raw));
+          }
+        } catch {}
+      }
+    }
+    if (first) updateBubble(botId, '(응답 없음)');
+    showRetrieval(botId, hits);
+    // 미답변 감지 — "규정에서 확인되지 않습니다" 포함 시 키워드 저장
+    if (raw.includes(UNANSWERED_PHRASE)) {
+      saveUnanswered(question);
+      appendMsg('system', `📋 미답변 키워드 저장됨: "${escHtml(question)}"`);
+    }
+  } catch(err) {
+    updateBubble(botId, `⚠️ 오류: ${escHtml(err.message)}`);
+  } finally {
+    sendBtn.disabled = false;
+    qEl.focus();
+  }
+}
+
+/* ════════════════════════════════════════════
+   관리자 인증 — 쓰기 요청 공용 헬퍼
+   비밀번호는 sessionStorage 에만 두고, 401이면 입력받아 한 번 재시도한다
+════════════════════════════════════════════ */
+let adminWait = null;   // { promise, resolve, reject } — 비밀번호 입력 대기
+
+function getAdminPw() {
+  try { return sessionStorage.getItem(ADMIN_PW_KEY) || ''; } catch { return ''; }
+}
+function setAdminPw(pw) {
+  try {
+    if (pw) sessionStorage.setItem(ADMIN_PW_KEY, pw);
+    else sessionStorage.removeItem(ADMIN_PW_KEY);
+  } catch {}
+}
+
+function showAdminAuth(msg, withInput, isError) {
+  document.getElementById('adminAuth').style.display = 'flex';
+  document.getElementById('adminPw').style.display    = withInput ? '' : 'none';
+  document.getElementById('adminPwBtn').style.display = withInput ? '' : 'none';
+  const m = document.getElementById('adminAuthMsg');
+  m.textContent = msg;
+  m.classList.toggle('err', !!isError);
+  if (withInput) document.getElementById('adminPw').focus();
+}
+function hideAdminAuth() {
+  document.getElementById('adminAuth').style.display = 'none';
+  document.getElementById('adminAuthMsg').textContent = '';
+}
+
+function cancelledError() {
+  const err = new Error('관리자 인증이 취소되었습니다.');
+  err.cancelled = true;
+  return err;
+}
+
+// 창이 닫혔거나 닫히는 중이면 입력받을 곳이 없으므로 바로 취소한다 (늦게 온 401로 대기가 영원히 남지 않게)
+function waitAdminPw(msg) {
+  if (docsClosing || !document.getElementById('docsOverlay').classList.contains('open')) {
+    return Promise.reject(cancelledError());
+  }
+  showAdminAuth(msg, true, false);
+  if (!adminWait) {
+    let resolve, reject;
+    const promise = new Promise((a, b) => { resolve = a; reject = b; });
+    adminWait = { promise, resolve, reject };
+  }
+  return adminWait.promise;
+}
+
+function submitAdminPw() {
+  const input = document.getElementById('adminPw');
+  const pw = input.value;
+  if (!pw) { showAdminAuth('비밀번호를 입력해 주세요.', true, true); return; }
+  setAdminPw(pw);
+  input.value = '';
+  if (adminWait) {
+    showAdminAuth('확인 중…', false, false);
+    const w = adminWait; adminWait = null;
+    w.resolve();
+  } else {
+    showAdminAuth('비밀번호 저장됨 — 작업을 다시 시도하세요.', false, false);
+  }
+}
+
+function cancelAdminWait() {
+  if (!adminWait) return;
+  const w = adminWait; adminWait = null;
+  w.reject(cancelledError());
+}
+
+async function readJson(res) {
+  try { return await res.json(); } catch { return {}; }
+}
+
+/* 모든 쓰기(POST/PUT/DELETE)는 여기로 — 실패 시 서버 메시지로 Error 를 던진다 (err.status, err.data) */
+async function apiWrite(method, path, body) {
+  const send = () => {
+    const headers = {};
+    const pw = getAdminPw();
+    if (pw) headers['X-Admin-Password'] = pw;
+    const opt = { method, headers };
+    if (body instanceof FormData) opt.body = body;
+    else if (body !== undefined) { headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+    return fetch(BE + path, opt);
+  };
+
+  let res = await send();
+  if (res.status === 401) {
+    const first = await readJson(res);
+    setAdminPw('');
+    await waitAdminPw(`🔒 ${first.error || '관리자 인증이 필요합니다.'} 비밀번호를 입력하세요.`);
+    res = await send();
+  }
+  const data = await readJson(res);
+  if (res.status === 401) {
+    setAdminPw('');
+    showAdminAuth('❌ 비밀번호가 올바르지 않습니다. 다시 입력한 뒤 작업을 다시 시도하세요.', true, true);
+  } else if (res.status === 503) {
+    showAdminAuth(`⚠️ ${data.error || '서버에 관리자 비밀번호가 설정되지 않아 저장할 수 없습니다.'}`, false, true);
+  } else if (res.ok) {
+    hideAdminAuth();
+  }
+  if (!res.ok || data.error) {
+    const err = new Error(data.error || `서버 오류 ${res.status}`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+document.getElementById('adminPw').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); submitAdminPw(); }
+});
+
+/* ════════════════════════════════════════════
+   자료 관리 — 상태
+════════════════════════════════════════════ */
+let docCategories = [];    // [{id, name}] — 서버 순서 = 화면 번호(01~99)
+let docList       = [];    // /api/docs 의 docs
+let catPanelOpen  = false;
+let catEditIdx    = -1;
+let editDocId     = null;  // 인라인 수정 중인 자료 id (문자열)
+let editDraft     = null;  // 다시 그려도 수정 중인 값이 날아가지 않게 보관
+let addFormEl     = null;  // 등록 폼 DOM — 다시 그려도 선택한 파일이 유지되도록 요소째 보관
+let needsReindex  = false;
+let docBusy       = 0;     // 진행 중인 등록·수정·삭제 수
+let docsClosing   = false;
+const docInflight = new Set();  // 저장·삭제 요청이 진행 중인 자료 id — 다시 그려도 버튼을 막아 둔다
+let addInflight   = false;      // 등록 요청 진행 중
+
+const UNCATEGORIZED = '미분류';
+const REPLACE_MSG   = '같은 문서명의 자료가 있습니다. 새 개정판으로 교체할까요?';
+
+function catNum(idx)   { return String(idx + 1).padStart(2, '0'); }
+function catLabel(idx) { return `${catNum(idx)}. ${docCategories[idx].name}`; }
+function findDoc(id)   { return docList.find(d => String(d.id) === String(id)); }
+function docsInCategory(id) { return id ? docList.filter(d => d.category === id).length : 0; }
+function setDocsStatus(t) { document.getElementById('docsStatus').textContent = t; }
+function inflightAttr(id) { return docInflight.has(String(id)) ? ' disabled' : ''; }
+
+// 진행 중 표시 — 지금 화면에 있는 그 자료의 저장·삭제 버튼을 함께 막고 푼다
+function setDocInflight(id, on) {
+  const key = String(id);
+  if (on) docInflight.add(key); else docInflight.delete(key);
+  document.querySelectorAll('#docsBody [data-act="doc-del"], #docsBody [data-act="doc-save"]').forEach(b => {
+    if (b.dataset.id === key) b.disabled = on;
+  });
+}
+
+// 대괄호가 들어간 문서명은 출처 태그 [문서명 제N조] 를 깨뜨리므로 막는다
+function hasBracket(t) { return /[\[\]]/.test(t); }
+
+// 서버 개정일 표기(2026.01.01 / 2026-1-1 / 2026년 1월 1일)를 date 입력용 YYYY-MM-DD 로
+function normalizeDate(s) {
+  const t = String(s || '');
+  const m = t.match(/(\d{4})\D{1,3}(\d{1,2})\D{1,3}(\d{1,2})/) || t.match(/^(\d{4})(\d{2})(\d{2})$/);
+  return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : '';
+}
+
+// 인증 관련(401·503·취소)은 툴바 안내로 충분하므로 alert 를 띄우지 않는다
+function shouldAlert(err) {
+  return !err.cancelled && err.status !== 401 && err.status !== 503;
+}
+
+// 분류 선택지 — 아직 id 를 받지 못한(저장 중인) 분류는 고를 수 없게 막는다
+function catOptionsHtml(selected) {
+  const sel = selected || '';
+  const known = docCategories.some(c => c.id && c.id === sel);
+  return `<option value=""${known ? '' : ' selected'}>${UNCATEGORIZED}</option>`
+    + docCategories.map((c, i) =>
+        `<option value="${escHtml(c.id)}"${c.id && c.id === sel ? ' selected' : ''}${c.id ? '' : ' disabled'}>${escHtml(catLabel(i))}</option>`
+      ).join('');
+}
+
+function refreshSelect(sel) {
+  if (sel) sel.innerHTML = catOptionsHtml(sel.value);
+}
+function refreshCategorySelects() {
+  if (addFormEl) refreshSelect(addFormEl.querySelector('#nf-cat'));
+  refreshSelect(document.getElementById('df-cat'));
+}
+
+/* ════════════════════════════════════════════
+   자료 관리 — 열기 / 닫기 / 불러오기
+════════════════════════════════════════════ */
+async function openDocs() {
+  document.getElementById('docsOverlay').classList.add('open');
+  setDocsStatus('');
+  cancelAdminWait();   // 남아 있는 대기가 있으면 깨끗이 취소한 뒤 인증 영역을 숨긴다
+  hideAdminAuth();
+  catPanelOpen = false;
+  catEditIdx = -1;
+  editDocId = null;
+  editDraft = null;
+  addFormEl = null;
+  document.getElementById('docsBody').innerHTML =
+    '<div style="text-align:center;padding:40px;color:var(--muted)">불러오는 중…</div>';
+  try {
+    await loadDocs();
+  } catch(err) {
+    document.getElementById('docsBody').innerHTML =
+      `<div style="color:#EF4444;padding:20px">❌ 불러오기 실패: ${escHtml(err.message)}</div>`;
+  }
+}
+
+async function loadDocs() {
+  const res  = await fetch(BE + '/api/docs');
+  const data = await readJson(res);
+  if (!res.ok || data.error) throw new Error(data.error || `서버 오류 ${res.status}`);
+  docCategories = (data.categories || []).map(c => ({ id: c.id, name: c.name }));
+  docList = data.docs || [];
+  if (editDocId && !findDoc(editDocId)) { editDocId = null; editDraft = null; }
+  renderDocs();
+}
+
+// 쓰기 성공 후 목록 새로고침 — 분류 즉시 저장이 끝난 뒤에 받아야 로컬 변경이 덮이지 않는다
+async function refreshDocs() {
+  while (catSaving) await sleep(200);
+  try { await loadDocs(); }
+  catch(err) { setDocsStatus(`⚠️ 목록 새로고침 실패: ${err.message}`); }
+}
+
+// 자료가 바뀌었으면 창을 닫을 때 한 번만 재색인 (변경마다 재색인하면 채팅창에 안내가 반복됨)
+async function closeDocs() {
+  if (docsClosing) return;
+  docsClosing = true;
+  let reindex = false;
+  try {
+    document.getElementById('docsOverlay').classList.remove('open');
+    cancelAdminWait();
+    while (catSaving || docBusy > 0) {
+      cancelAdminWait();   // 기다리는 동안 생긴 인증 대기도 바로 취소
+      await sleep(200);
+    }
+    reindex = needsReindex;
+    needsReindex = false;
+  } finally {
+    docsClosing = false;
+  }
+  if (reindex) {
+    appendMsg('system', '💾 자료 변경 반영 — 재색인 시작');
+    await autoLoadData();
+  }
+}
+
+document.getElementById('docsOverlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeDocs();
+});
+
+/* ════════════════════════════════════════════
+   자료 관리 — 전체 렌더 (분류 순서대로 묶고, 미분류는 맨 끝)
+════════════════════════════════════════════ */
+function renderDocs() {
+  captureEditDraft();
+  document.getElementById('docsCount').textContent = docList.length;
+
+  const body = document.getElementById('docsBody');
+  body.innerHTML = '';
+
+  if (catPanelOpen) body.appendChild(buildCategoryPanel());
+  if (addFormEl) {
+    refreshSelect(addFormEl.querySelector('#nf-cat'));
+    body.appendChild(addFormEl);
+  }
+
+  const knownIds = new Set(docCategories.map(c => c.id).filter(Boolean));
+  const groups = docCategories.map((c, i) => ({
+    label: catLabel(i),
+    docs: c.id ? docList.filter(d => d.category === c.id) : [],
+  }));
+  const loose = docList.filter(d => !d.category || !knownIds.has(d.category));
+  if (loose.length) groups.push({ label: UNCATEGORIZED, docs: loose });
+
+  if (!groups.length) {
+    body.insertAdjacentHTML('beforeend',
+      '<div class="sec-empty" style="text-align:center;padding:30px">등록된 분류·자료가 없습니다. ＋ 자료 등록 또는 📁 분류 관리로 시작하세요.</div>');
+    return;
+  }
+
+  groups.forEach(g => {
+    const grp = document.createElement('div');
+    grp.className = 'sec-group';
+    grp.innerHTML = `
+      <div class="sec-head">
+        <span class="sec-label">${escHtml(g.label)}</span>
+        <span class="sp-count">${g.docs.length}개</span>
+      </div>
+      ${g.docs.length ? g.docs.map(docRowHtml).join('') : '<div class="sec-empty">등록된 자료 없음</div>'}`;
+    body.appendChild(grp);
+  });
+}
+
+function docRowHtml(d) {
+  if (editDocId != null && String(d.id) === editDocId) return docEditFormHtml(d);
+  const meta = [
+    d.revised ? `개정일 ${d.revised}` : '개정일 없음',
+    d.author  ? `등록자 ${d.author}`  : '',
+    d.error   ? '⚠️ 파싱 오류'         : `청크 ${d.chunks ?? 0}개`,
+  ].filter(Boolean).map(escHtml).join(' · ');
+  return `
+    <div class="doc-row" data-id="${escHtml(d.id)}">
+      <div class="doc-info">
+        <span class="doc-title" title="${escHtml(d.filename)}">${escHtml(d.title || d.filename)}</span>
+        <span class="doc-meta${d.error ? ' err' : ''}"${d.error ? ` title="${escHtml(d.error)}"` : ''}>${meta}</span>
+      </div>
+      <div class="doc-actions">
+        <button class="qna-btn edit" data-act="doc-edit" data-id="${escHtml(d.id)}">✏️ 수정</button>
+        <button class="qna-btn del"  data-act="doc-del"  data-id="${escHtml(d.id)}"${inflightAttr(d.id)}>🗑️ 삭제</button>
+      </div>
+    </div>`;
+}
+
+/* ════════════════════════════════════════════
+   자료 관리 — 인라인 수정 (분류·문서명·개정일·등록자)
+════════════════════════════════════════════ */
+function docEditFormHtml(d) {
+  const v = editDraft || {
+    category: d.category || '',
+    title:    d.title || '',
+    revised:  normalizeDate(d.revised),
+    author:   d.author || '',
+  };
+  const badDate = d.revised && !normalizeDate(d.revised);
+  return `
+    <div class="edit-form" id="doc-edit-form" data-id="${escHtml(d.id)}">
+      <div class="form-title">✏️ 자료 정보 수정 <span class="form-hint">${escHtml(d.filename)}</span></div>
+      <div class="form-grid">
+        <div class="form-row">
+          <label class="form-label" for="df-cat">분류</label>
+          <select class="form-select" id="df-cat">${catOptionsHtml(v.category)}</select>
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="df-rev">개정일</label>
+          <input type="date" class="form-input" id="df-rev" value="${escHtml(v.revised)}" />
+          ${badDate ? `<span class="form-hint">기존 표기: ${escHtml(d.revised)}</span>` : ''}
+        </div>
+        <div class="form-row full">
+          <label class="form-label" for="df-title">문서명 <span class="req">*</span></label>
+          <input class="form-input" id="df-title" value="${escHtml(v.title)}" maxlength="100" placeholder="문서명" />
+        </div>
+        <div class="form-row full">
+          <label class="form-label" for="df-by">등록자 <span class="req">*</span></label>
+          <input class="form-input" id="df-by" value="${escHtml(v.author)}" maxlength="20" placeholder="등록자 이름" />
+        </div>
+      </div>
+      <div class="form-btns">
+        <button class="btn btn-ghost" data-act="doc-cancel">취소</button>
+        <button class="btn btn-primary" id="df-save" data-act="doc-save" data-id="${escHtml(d.id)}"${inflightAttr(d.id)}>저장</button>
+      </div>
+    </div>`;
+}
+
+function captureEditDraft() {
+  if (editDocId == null || !document.getElementById('df-title')) return;
+  editDraft = {
+    category: document.getElementById('df-cat').value,
+    title:    document.getElementById('df-title').value,
+    revised:  document.getElementById('df-rev').value,
+    author:   document.getElementById('df-by').value,
+  };
+}
+
+function startDocEdit(id) {
+  editDocId = String(id);
+  editDraft = null;
+  renderDocs();
+  const form = document.getElementById('doc-edit-form');
+  if (form) form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  document.getElementById('df-title')?.focus();
+}
+
+function cancelDocEdit() {
+  editDocId = null;
+  editDraft = null;
+  renderDocs();
+}
+
+async function applyDocEdit(id, btn) {
+  if (docInflight.has(String(id))) return;
+  const title  = document.getElementById('df-title').value.trim();
+  const author = document.getElementById('df-by').value.trim();
+  if (!title)  { alert('문서명을 입력해 주세요.'); return; }
+  if (hasBracket(title)) { alert('문서명에는 대괄호([ ])를 쓸 수 없습니다.'); return; }
+  if (!author) { alert('등록자 이름을 입력해 주세요.'); return; }
+  const payload = {
+    category: document.getElementById('df-cat').value,
+    title,
+    revised:  document.getElementById('df-rev').value,
+    author,
+  };
+  setDocInflight(id, true);
+  docBusy++;
+  setDocsStatus('자료 정보 저장 중…');
+  try {
+    while (catSaving) await sleep(200);
+    await apiWrite('PUT', '/api/docs/' + encodeURIComponent(id), payload);
+    needsReindex = true;
+    editDocId = null;
+    editDraft = null;
+    await refreshDocs();
+    setDocsStatus(`✅ "${title}" 정보 수정됨 — 창을 닫으면 재색인됩니다`);
+  } catch(err) {
+    setDocsStatus(`❌ 수정 실패: ${err.message}`);
+    if (shouldAlert(err)) alert('수정 실패: ' + err.message);
+  } finally {
+    docBusy--;
+    setDocInflight(id, false);
+  }
+}
+
+/* 삭제 — 확인 후 진행 */
+async function deleteDoc(id, btn) {
+  if (docInflight.has(String(id))) return;
+  const d = findDoc(id);
+  if (!d) return;
+  const title = d.title || d.filename || '';
+  if (!confirm(`"${title}" 자료를 삭제하시겠습니까?`)) return;
+  if (docInflight.has(String(id))) return;   // 확인 창을 띄운 사이 다른 요청이 시작됐으면 무시
+  setDocInflight(id, true);
+  docBusy++;
+  setDocsStatus('삭제 중…');
+  try {
+    await apiWrite('DELETE', '/api/docs/' + encodeURIComponent(id));
+    needsReindex = true;
+    if (editDocId === String(id)) { editDocId = null; editDraft = null; }
+    await refreshDocs();
+    setDocsStatus(`🗑️ "${title}" 삭제됨 — 창을 닫으면 재색인됩니다`);
+  } catch(err) {
+    setDocsStatus(`❌ 삭제 실패: ${err.message}`);
+    if (shouldAlert(err)) alert('삭제 실패: ' + err.message);
+  } finally {
+    docBusy--;
+    setDocInflight(id, false);
+  }
+}
+
+/* ════════════════════════════════════════════
+   자료 관리 — 등록 폼
+════════════════════════════════════════════ */
+function showDocAddForm() {
+  if (!addFormEl) addFormEl = buildDocAddForm();
+  renderDocs();
+  addFormEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  document.getElementById('nf-file')?.focus();
+}
+
+function cancelDocAdd() {
+  addFormEl = null;
+  renderDocs();
+}
+
+function buildDocAddForm() {
+  const form = document.createElement('div');
+  form.className = 'edit-form';
+  form.id = 'doc-add-form';
+  form.innerHTML = `
+    <div class="form-title">＋ 자료 등록</div>
+    <div class="form-row">
+      <label class="form-label" for="nf-file">파일 (PDF·DOCX, ${MAX_UPLOAD_MB}MB 이하) <span class="req">*</span></label>
+      <input type="file" class="form-input" id="nf-file" accept=".pdf,.docx" />
+    </div>
+    <div class="form-grid">
+      <div class="form-row">
+        <label class="form-label" for="nf-cat">분류</label>
+        <select class="form-select" id="nf-cat"></select>
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="nf-rev">개정일</label>
+        <input type="date" class="form-input" id="nf-rev" />
+      </div>
+      <div class="form-row full">
+        <label class="form-label" for="nf-title">문서명</label>
+        <input class="form-input" id="nf-title" maxlength="100" placeholder="파일을 고르면 파일명으로 채워집니다" />
+      </div>
+      <div class="form-row full">
+        <label class="form-label" for="nf-by">등록자 <span class="req">*</span></label>
+        <input class="form-input" id="nf-by" maxlength="20" placeholder="등록자 이름" />
+      </div>
+    </div>
+    <span class="form-hint">같은 문서명의 자료가 이미 있으면 새 개정판으로 교체할지 묻습니다.</span>
+    <div class="form-btns">
+      <button class="btn btn-ghost" data-act="add-cancel">취소</button>
+      <button class="btn btn-primary" id="nf-submit" data-act="add-submit">등록</button>
+    </div>`;
+
+  // 파일을 고르면 문서명 기본값 = 파일명(확장자 제외). 직접 고친 문서명은 덮지 않는다
+  const fileEl  = form.querySelector('#nf-file');
+  const titleEl = form.querySelector('#nf-title');
+  fileEl.addEventListener('change', () => {
+    const f = fileEl.files && fileEl.files[0];
+    if (!f) return;
+    const stem = f.name.replace(/\.[^.]+$/, '');
+    if (!titleEl.value.trim() || titleEl.value === form.dataset.autoTitle) {
+      titleEl.value = stem;
+      form.dataset.autoTitle = stem;
+    }
+  });
+  return form;
+}
+
+async function submitDocAdd(btn) {
+  const form = addFormEl;
+  if (!form || addInflight) return;
+  const file = form.querySelector('#nf-file').files[0];
+  if (!file) { alert('등록할 파일을 선택해 주세요.'); return; }
+  if (!/\.(pdf|docx)$/i.test(file.name)) { alert('PDF 또는 DOCX 파일만 등록할 수 있습니다.'); return; }
+  if (file.size > MAX_UPLOAD_MB * 1024 * 1024) { alert(`파일 크기는 ${MAX_UPLOAD_MB}MB 이하만 등록할 수 있습니다.`); return; }
+  const title   = form.querySelector('#nf-title').value.trim() || file.name.replace(/\.[^.]+$/, '');
+  const author  = form.querySelector('#nf-by').value.trim();
+  const revised = form.querySelector('#nf-rev').value;
+  const category = form.querySelector('#nf-cat').value;
+  if (hasBracket(title)) { alert('문서명에는 대괄호([ ])를 쓸 수 없습니다.'); return; }
+  if (!author) { alert('등록자 이름을 입력해 주세요.'); return; }
+
+  let replaceId = '';
+  const dup = docList.find(d => (d.title || '').trim().toLowerCase() === title.toLowerCase());
+  if (dup) {
+    if (!confirm(REPLACE_MSG)) return;
+    replaceId = String(dup.id);
+    if (docInflight.has(replaceId)) { alert('교체할 자료에 다른 작업이 진행 중입니다. 잠시 후 다시 시도해 주세요.'); return; }
+  }
+  if (addInflight) return;   // 확인 창을 띄운 사이 다른 등록이 시작됐으면 무시
+
+  const build = rid => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('category', category);
+    fd.append('title', title);
+    fd.append('revised', revised);
+    fd.append('author', author);
+    if (rid) fd.append('replace_id', rid);
+    return fd;
+  };
+
+  addInflight = true;
+  btn.disabled = true;
+  if (replaceId) setDocInflight(replaceId, true);
+  docBusy++;
+  setDocsStatus(`"${title}" 업로드·파싱 중…`);
+  try {
+    while (catSaving) await sleep(200);
+    let data;
+    try {
+      data = await apiWrite('POST', '/api/docs/upload', build(replaceId));
+    } catch(err) {
+      // 화면 목록이 오래됐어도 서버가 같은 문서명을 알려주면 다시 묻고 교체한다
+      const existing = err.status === 409 && err.data && err.data.existing_id;
+      if (!existing || String(existing) === replaceId) throw err;
+      if (!confirm(REPLACE_MSG)) { setDocsStatus('등록 취소됨'); return; }
+      if (replaceId) setDocInflight(replaceId, false);
+      replaceId = String(existing);
+      setDocInflight(replaceId, true);
+      data = await apiWrite('POST', '/api/docs/upload', build(replaceId));
+    }
+    needsReindex = true;
+    addFormEl = null;
+    await refreshDocs();
+    const doc = (data && data.doc) || {};
+    setDocsStatus(doc.error
+      ? `⚠️ "${title}" ${replaceId ? '교체' : '등록'}됨 — 파싱 오류: ${doc.error}`
+      : `✅ "${title}" ${replaceId ? '교체' : '등록'} 완료 (청크 ${doc.chunks ?? '?'}개) — 창을 닫으면 재색인됩니다`);
+  } catch(err) {
+    setDocsStatus(`❌ 등록 실패: ${err.message}`);
+    if (shouldAlert(err)) alert('등록 실패: ' + err.message);
+  } finally {
+    docBusy--;
+    if (replaceId) setDocInflight(replaceId, false);
+    addInflight = false;
+    btn.disabled = false;
+  }
+}
+
+/* ════════════════════════════════════════════
+   분류 관리 패널 (추가 + 목록에서 수정·삭제) — 바뀔 때마다 전체 목록을 즉시 저장
+════════════════════════════════════════════ */
+function showCategoryPanel() {
+  catPanelOpen = true;
+  catEditIdx = -1;
+  renderDocs();
+  document.getElementById('docsBody').scrollTop = 0;
+  document.getElementById('cp-new-name')?.focus();
+}
+
+function closeCategoryPanel() {
+  catPanelOpen = false;
+  catEditIdx = -1;
+  renderDocs();
+}
+
+// renderDocs 가 본문을 다시 그릴 때마다 맨 위에 다시 붙인다
+function buildCategoryPanel() {
+  const canAdd = docCategories.length < MAX_CATEGORIES;
+  const rows = docCategories.map((c, idx) => {
+    const numHtml = `<span class="sp-num">${catNum(idx)}.</span>`;
+    if (idx === catEditIdx) {
+      return `<div class="sp-row editing">
+        ${numHtml}
+        <input class="form-input sp-input" id="cp-edit-input" data-idx="${idx}" value="${escHtml(c.name)}" maxlength="30" />
+        <button class="qna-btn" data-act="cat-cancel">취소</button>
+        <button class="qna-btn edit" data-act="cat-save" data-idx="${idx}">저장</button>
+      </div>`;
+    }
+    return `<div class="sp-row">
+      ${numHtml}
+      <span class="sp-label" title="${escHtml(c.name)}">${escHtml(c.name)}</span>
+      <span class="sp-count">${docsInCategory(c.id)}개</span>
+      <button class="qna-btn edit" data-act="cat-edit" data-idx="${idx}">✏️ 수정</button>
+      <button class="qna-btn del" data-act="cat-del" data-idx="${idx}">🗑️ 삭제</button>
+    </div>`;
+  }).join('');
+
+  const panel = document.createElement('div');
+  panel.className = 'edit-form';
+  panel.id = 'cat-panel';
+  panel.innerHTML = `
+    <div class="form-title">📁 분류 관리 <span class="sp-count">${docCategories.length} / ${MAX_CATEGORIES}</span></div>
+    <div class="form-row">
+      <label class="form-label" for="cp-new-name">새 분류명</label>
+      ${canAdd ? `
+      <div class="sp-add">
+        <span class="sp-num">${catNum(docCategories.length)}.</span>
+        <input class="form-input" id="cp-new-name" placeholder="예: 감염관리" maxlength="30" />
+        <button class="btn btn-primary" id="cp-add" data-act="cat-add">분류 추가</button>
+      </div>
+      <span class="form-hint">자동으로 "${catNum(docCategories.length)}. 입력값" 형식으로 생성됩니다.</span>`
+      : `<span class="form-hint">분류는 최대 ${MAX_CATEGORIES}개까지 만들 수 있습니다.</span>`}
+    </div>
+    <div class="form-row">
+      <label class="form-label">등록된 분류</label>
+      <div class="sp-list">${rows || '<span class="form-hint">분류가 없습니다.</span>'}</div>
+      <span class="form-hint">추가·수정·삭제는 바로 서버에 저장됩니다.<br>자료가 들어 있는 분류는 자료를 옮기거나 지운 뒤 삭제할 수 있습니다.</span>
+    </div>
+    <div class="form-btns">
+      <button class="btn btn-ghost" data-act="cat-close">닫기</button>
+    </div>`;
+  return panel;
+}
+
+function isDupCategory(name, exceptIdx) {
+  const key = name.toLowerCase();
+  return docCategories.some((c, i) => i !== exceptIdx && c.name.trim().toLowerCase() === key);
+}
+
+function startCatEdit(idx) {
+  catEditIdx = idx;
+  renderDocs();
+  const input = document.getElementById('cp-edit-input');
+  if (input) { input.focus(); input.select(); }
+}
+
+function cancelCatEdit() {
+  catEditIdx = -1;
+  renderDocs();
+}
+
+// 이름만 바꾸므로 id 는 그대로 — 자료의 분류 연결이 유지된다
+function applyCatEdit(idx) {
+  const c = docCategories[idx];
+  const input = document.getElementById('cp-edit-input');
+  if (!c || !input) return;
+  const name = input.value.trim();
+  if (!name) { alert('분류명을 입력해 주세요.'); return; }
+  if (isDupCategory(name, idx)) { alert('이미 존재하는 분류입니다.'); return; }
+  const changed = c.name !== name;
+  c.name = name;
+  catEditIdx = -1;
+  renderDocs();
+  if (changed) saveCategoryChange();
+}
+
+function applyAddCategory() {
+  if (docCategories.length >= MAX_CATEGORIES) { alert(`분류는 최대 ${MAX_CATEGORIES}개까지 만들 수 있습니다.`); return; }
+  const input = document.getElementById('cp-new-name');
+  const name = (input ? input.value : '').trim();
+  if (!name) { alert('분류명을 입력해 주세요.'); return; }
+  if (isDupCategory(name, -1)) { alert('이미 존재하는 분류입니다.'); return; }
+  docCategories.push({ id: null, name });
+  renderDocs();
+  document.getElementById('cp-new-name')?.focus();
+  saveCategoryChange();
+}
+
+/* 분류 삭제 — 자료가 남아 있으면 막는다 (서버도 409로 한 번 더 막음) */
+function deleteCategory(idx) {
+  const c = docCategories[idx];
+  if (!c) return;
+  const count = docsInCategory(c.id);
+  if (count) {
+    alert(`이 분류에 자료 ${count}개가 있어 삭제할 수 없습니다.\n자료를 다른 분류로 옮기거나 먼저 삭제해 주세요.`);
+    return;
+  }
+  if (!confirm(`"${catLabel(idx)}" 분류를 삭제하시겠습니까?`)) return;
+  docCategories.splice(idx, 1);
+  catEditIdx = -1;
+  renderDocs();
+  saveCategoryChange();
+}
+
+/* 분류 변경 즉시 저장 — 연속으로 바꿔도 요청이 겹치지 않게 한 번에 하나씩 (전체 목록을 PUT) */
+let catSaving = false;
+let catSavePending = false;
+
+async function saveCategoryChange() {
+  if (catSaving) { catSavePending = true; return; }
+  catSaving = true;
+  let failed = false;
+  try {
+    do {
+      catSavePending = false;
+      setDocsStatus('분류 변경 저장 중…');
+      const sent = docCategories.slice();
+      const data = await apiWrite('PUT', '/api/categories', {
+        categories: sent.map(c => ({ id: c.id || null, name: c.name })),
+      });
+      // 새 분류는 서버가 준 id 를 받아 둔다 (같은 자리·같은 이름 우선)
+      const saved = data.categories || [];
+      sent.forEach((c, i) => {
+        if (c.id) return;
+        const m = (saved[i] && saved[i].name === c.name) ? saved[i] : saved.find(s => s.name === c.name);
+        if (m) c.id = m.id;
+      });
+      needsReindex = true;
+      setDocsStatus(`✅ 분류 변경 저장됨 (분류 ${docCategories.length}개 · 자료 ${docList.length}건)`);
+    } while (catSavePending);
+  } catch(err) {
+    failed = true;
+    catSavePending = false;
+    setDocsStatus(`❌ 분류 저장 실패: ${err.message}`);
+    if (err.status === 409) alert(err.message);
+  } finally {
+    catSaving = false;
+  }
+  if (failed) {
+    // 화면과 서버가 어긋났을 수 있으므로 서버 기준으로 다시 맞춘다
+    try { catEditIdx = -1; await loadDocs(); } catch {}
+  } else {
+    refreshCategorySelects();   // 새 분류가 id 를 받았으니 선택지에서 고를 수 있게 갱신
+  }
+}
+
+/* ════════════════════════════════════════════
+   자료 관리 — 버튼·키 이벤트 위임 (데이터 문자열을 인라인 핸들러에 넣지 않는다)
+════════════════════════════════════════════ */
+const docsBodyEl = document.getElementById('docsBody');
+
+docsBodyEl.addEventListener('click', e => {
+  const btn = e.target.closest('[data-act]');
+  if (!btn || !docsBodyEl.contains(btn)) return;
+  const idx = Number(btn.dataset.idx);
+  const id  = btn.dataset.id;
+  switch (btn.dataset.act) {
+    case 'cat-edit':   startCatEdit(idx); break;
+    case 'cat-del':    deleteCategory(idx); break;
+    case 'cat-save':   applyCatEdit(idx); break;
+    case 'cat-cancel': cancelCatEdit(); break;
+    case 'cat-add':    applyAddCategory(); break;
+    case 'cat-close':  closeCategoryPanel(); break;
+    case 'doc-edit':   startDocEdit(id); break;
+    case 'doc-del':    deleteDoc(id, btn); break;
+    case 'doc-save':   applyDocEdit(id, btn); break;
+    case 'doc-cancel': cancelDocEdit(); break;
+    case 'add-submit': submitDocAdd(btn); break;
+    case 'add-cancel': cancelDocAdd(); break;
+  }
+});
+
+docsBodyEl.addEventListener('keydown', e => {
+  if (e.isComposing) return;   // 한글 조합 중 Enter 무시
+  const t = e.target;
+  if (t.id === 'cp-edit-input') {
+    if (e.key === 'Enter')  { e.preventDefault(); applyCatEdit(Number(t.dataset.idx)); }
+    if (e.key === 'Escape') { e.preventDefault(); cancelCatEdit(); }
+  } else if (t.id === 'cp-new-name' && e.key === 'Enter') {
+    e.preventDefault();
+    applyAddCategory();
+  }
+});
+
+/* ════════════════════════════════════════════
+   미답변 키워드 관리
+════════════════════════════════════════════ */
+let unansweredList = JSON.parse(localStorage.getItem('nurse_unanswered') || '[]');
+
+function saveUnanswered(question) {
+  unansweredList.unshift({
+    q: question,
+    time: new Date().toLocaleString('ko-KR', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
+  });
+  localStorage.setItem('nurse_unanswered', JSON.stringify(unansweredList));
+  updateUnansweredBadge();
+}
+
+function updateUnansweredBadge() {
+  const badge = document.getElementById('unansweredBadge');
+  if (!badge) return;
+  if (unansweredList.length > 0) {
+    badge.textContent = unansweredList.length;
+    badge.style.display = 'inline-flex';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function openUnansweredModal() {
+  renderUnansweredBody();
+  document.getElementById('unansweredOverlay').classList.add('open');
+}
+
+function closeUnansweredModal() {
+  document.getElementById('unansweredOverlay').classList.remove('open');
+}
+
+function renderUnansweredBody() {
+  const body = document.getElementById('unansweredBody');
+  const count = document.getElementById('unansweredCount');
+  count.textContent = unansweredList.length;
+  if (!unansweredList.length) {
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">미답변 항목이 없습니다.</div>';
+    return;
+  }
+  body.innerHTML = unansweredList.map((it, i) => `
+    <div class="ua-item">
+      <div class="ua-meta">
+        <span class="ua-time">${escHtml(it.time)}</span>
+        <span class="ua-q">${escHtml(it.q)}</span>
+      </div>
+      <button class="ua-del" onclick="deleteUnanswered(${i})" title="삭제">✕</button>
+    </div>`).join('');
+}
+
+function deleteUnanswered(idx) {
+  unansweredList.splice(idx, 1);
+  localStorage.setItem('nurse_unanswered', JSON.stringify(unansweredList));
+  updateUnansweredBadge();
+  renderUnansweredBody();
+}
+
+function clearAllUnanswered() {
+  if (!confirm('미답변 목록을 전체 삭제하시겠습니까?')) return;
+  unansweredList = [];
+  localStorage.setItem('nurse_unanswered', JSON.stringify(unansweredList));
+  updateUnansweredBadge();
+  renderUnansweredBody();
+}
+
+/* ════════════════════════════════════════════
+   페이지 로드 시 자동 데이터 로딩
+════════════════════════════════════════════ */
+updateUnansweredBadge();
+autoLoadData();
+</script>
+</body>
+</html>

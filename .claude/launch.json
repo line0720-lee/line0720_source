@@ -18,6 +18,18 @@
       "runtimeExecutable": "task-share-manager/venv/Scripts/python.exe",
       "runtimeArgs": ["task-share-manager/app.py"],
       "port": 5050
+    },
+    {
+      "name": "Nurse_Guide",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "3003", "--directory", "Nurse_Guide"],
+      "port": 3003
+    },
+    {
+      "name": "Nurse_Guide-backend",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["Nurse_Guide/backend.py"],
+      "port": 8001
     }
   ]
 }
