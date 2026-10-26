@@ -99,9 +99,13 @@ app.add_middleware(
 )
 
 # ── 공유 게이트웨이 주소 (모든 모델 호출은 이 변수만 사용) ──────────────
-GATEWAY      = ""  # TODO(1단계-6 보류): 내 PC에서 접속되는 게이트웨이 주소를 받으면 여기에만 입력
-OLLAMA_URL   = f"{GATEWAY}/api/chat"
-OLLAMA_EMBED = f"{GATEWAY}/api/embed"
+# 주소는 외부 공유 금지 → 코드·깃에 쓰지 않고 환경변수 NURSE_GATEWAY(.env)로만 받는다. 예: http://게이트웨이:11500
+def gateway_urls():
+    gw = os.environ.get("NURSE_GATEWAY", "").strip().rstrip("/")
+    return gw, f"{gw}/api/chat", f"{gw}/api/embed"
+
+
+GATEWAY, OLLAMA_URL, OLLAMA_EMBED = gateway_urls()
 MODEL        = "qwen3.6:35b-a3b"
 EMBED_MODEL  = "bge-m3"
 
@@ -119,8 +123,10 @@ SYSTEM_PROMPT = (
     "규칙 3 (형식): 절차가 여러 단계이면 번호를 붙여 한 줄에 한 단계씩 쓴다.\n"
     "규칙 4 (환자 안전): 투약 용량·희석·주입 속도·응급 처치와 관련된 답변은 "
     "마지막 줄에 '※ 실제 시행 전 원문과 처방을 반드시 확인하세요.'를 붙인다.\n"
-    "규칙 5 (개인정보·임상 판단): 환자 개인정보가 들어 있거나 특정 환자에 대한 판단을 요청하는 질문에는 "
-    "자료와 상관없이 '개인정보·임상 판단은 안내하지 않습니다'라고만 답한다.\n"
+    "규칙 5 (개인정보·임상 판단): 질문에 특정 환자의 이름·등록번호·생년월일 같은 개인정보가 들어 있거나, "
+    "특정 환자에게 어떤 처치를 해도 되는지 판단을 요청할 때에만 '개인정보·임상 판단은 안내하지 않습니다'라고만 답한다. "
+    "환자와 관련 없는 질문(주차·식당·행정 등)이나 자료에 없는 일반 질문에는 이 문구를 쓰지 말고 규칙 1에 따라 "
+    "'규정에서 확인되지 않습니다'라고 답한다.\n"
     "규칙 6 (개정일): 같은 내용이 개정일이 다른 문서에 있으면 개정일이 최신인 문서를 우선하고, "
     "문서 간 내용이 다르다는 점을 함께 알려준다.\n"
     "예시:\n"
@@ -464,7 +470,7 @@ async def stream_ollama(question: str, context: str):
         yield "data: [DONE]\n\n"
 
 
-GATEWAY_MISSING = {"error": "게이트웨이 주소가 설정되지 않았습니다 (backend.py GATEWAY)"}
+GATEWAY_MISSING = {"error": "게이트웨이 주소가 설정되지 않았습니다 (NURSE_GATEWAY)"}
 GATEWAY_DOWN    = "⚠️ 모델 게이트웨이에 연결할 수 없습니다."
 
 
@@ -700,4 +706,5 @@ async def health():
 if __name__ == "__main__":
     import uvicorn
     load_env_file()
+    GATEWAY, OLLAMA_URL, OLLAMA_EMBED = gateway_urls()   # .env 값 반영
     uvicorn.run(app, host=os.environ.get("NURSE_HOST", "0.0.0.0"), port=int(os.environ.get("NURSE_PORT", PORT)))

@@ -29,6 +29,7 @@ for _f in SAMPLES:
     shutil.copy2(os.path.join(REAL_DATA, _f), TMP.name)
 os.environ["NURSE_DATA_DIR"] = TMP.name
 os.environ["NURSE_ALLOWED_HOSTS"] = "testserver"   # TestClient 의 기본 Host
+os.environ["NURSE_GATEWAY"] = ""                    # 실제 게이트웨이로 나가지 않게 (게이트웨이 미설정 상태로 시험)
 sys.path.insert(0, NG_DIR)
 
 import backend  # noqa: E402
@@ -507,6 +508,31 @@ class TestHardening(ApiCase):
         self.assertEqual(self.c.post("/api/embed", json={"texts": ["t" * 8000] * 64}).status_code, 503)
         self.assertEqual(self.c.post("/api/embed", json={"texts": ["t"] * 65}).status_code, 400)
         self.assertEqual(self.c.post("/api/embed", json={"texts": ["t" * 8001]}).status_code, 400)
+
+
+class TestGatewayConfig(unittest.TestCase):
+    """게이트웨이 주소는 코드가 아니라 환경변수 NURSE_GATEWAY(.env)에서만 읽는다."""
+
+    def test_reads_env_and_strips_slash(self):
+        with mock.patch.dict(os.environ, {"NURSE_GATEWAY": " http://gw.example:11500/ "}):
+            self.assertEqual(backend.gateway_urls(),
+                             ("http://gw.example:11500", "http://gw.example:11500/api/chat",
+                              "http://gw.example:11500/api/embed"))
+
+    def test_unset_means_empty(self):
+        env = {k: v for k, v in os.environ.items() if k != "NURSE_GATEWAY"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(backend.gateway_urls()[0], "")
+
+    def test_env_file_sets_gateway(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, ".env")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("# 주석\nNURSE_GATEWAY=http://gw.example:11500\n")
+            env = {k: v for k, v in os.environ.items() if k != "NURSE_GATEWAY"}
+            with mock.patch.dict(os.environ, env, clear=True):
+                backend.load_env_file(p)
+                self.assertEqual(backend.gateway_urls()[0], "http://gw.example:11500")
 
 
 class TestHostCheck(ApiCase):
