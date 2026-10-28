@@ -3,6 +3,7 @@ models/
 build/
 dist/
 tests/samples/
+tests/output/
 __pycache__/
 *.xlsx
 release/
