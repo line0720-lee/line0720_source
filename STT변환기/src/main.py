@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import ctypes
 import os
 import sys
 
@@ -13,10 +14,16 @@ import sys
 os.environ["HF_HUB_OFFLINE"] = "1"
 
 
+_STD_STREAMS_MISSING = False  # 시작할 때 stdout/stderr가 없었는지(콘솔 없는 exe·pythonw)
+_ATTACH_PARENT_PROCESS = -1  # AttachConsole: 이 프로그램을 실행한 부모 프로세스의 콘솔
+
+
 def _prepare_std_streams() -> None:
     """콘솔 없는 exe(console=False)는 stdout/stderr가 None이라 print·로그 출력에서 죽으므로 빈 장치로 돌린다."""
+    global _STD_STREAMS_MISSING
     for name in ("stdout", "stderr"):
         if getattr(sys, name) is None:
+            _STD_STREAMS_MISSING = True
             setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115 - 프로그램 끝까지 연다
     encoding = (getattr(sys.stdout, "encoding", "") or "").lower().replace("-", "")
     if encoding != "utf8":
@@ -28,8 +35,31 @@ def _prepare_std_streams() -> None:
 
 _prepare_std_streams()
 
+
+def _attach_parent_console() -> bool:
+    """명령줄(--no-gui) 모드 전용: 콘솔 없는 exe를 cmd/PowerShell에서 실행했을 때 그 창에 진행 문구가 보이게 한다.
+
+    부모 콘솔에 붙어(AttachConsole) stdout/stderr를 CONOUT$로 다시 연다. 원래 출력이 있었거나(python 실행·
+    출력 리디렉션) 붙지 못하면(탐색기에서 실행 등) 아무것도 하지 않는다(빈 장치 유지). 화면 모드에서는 부르지 않는다.
+    """
+    if not _STD_STREAMS_MISSING:
+        return False
+    try:
+        if not ctypes.windll.kernel32.AttachConsole(_ATTACH_PARENT_PROCESS):
+            return False
+        out = open("CONOUT$", "w", encoding="utf-8", errors="replace", buffering=1)  # noqa: SIM115
+        try:
+            err = open("CONOUT$", "w", encoding="utf-8", errors="replace", buffering=1)  # noqa: SIM115
+        except (OSError, ValueError):
+            out.close()
+            raise
+    except (AttributeError, OSError, ValueError):
+        return False
+    sys.stdout, sys.stderr = out, err
+    return True
+
+
 import argparse  # noqa: E402
-import ctypes  # noqa: E402
 import logging  # noqa: E402
 import queue  # noqa: E402
 import threading  # noqa: E402
@@ -916,13 +946,16 @@ def _show_startup_error(message: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_args = sys.argv[1:] if argv is None else list(argv)
+    if "--no-gui" in raw_args:  # 줄임말은 막아 두었으므로(allow_abbrev=False) 정확히 이 값일 때만 명령줄 모드
+        _attach_parent_console()  # 경고·인자 오류까지 호출한 창에 보이도록 가장 먼저 붙는다
+
     try:
         log_dir: Path | None = setup_logging()
     except ConfigError as exc:
         log_dir = None  # 로그 없이도 변환은 할 수 있게 한다
         print(f"경고: {exc}", file=sys.stderr)
 
-    raw_args = sys.argv[1:] if argv is None else list(argv)
     parser = _build_parser()
     try:
         args = parser.parse_args(raw_args)
