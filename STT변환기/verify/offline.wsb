@@ -1,0 +1,40 @@
+<Configuration>
+  <!--
+    STT변환기 오프라인 검증용 Windows Sandbox 설정 (Windows Sandbox를 켠 PC에서 이 파일을 더블클릭)
+    - 네트워크 차단, Python 없는 깨끗한 Windows에서 dist\STT변환기를 명령줄 모드로 실행한다.
+    - 실행 전 준비: build.bat으로 dist\STT변환기를 만들고, tests\output\sandbox 폴더가 있어야 한다
+      (없으면 프로젝트 폴더에서 mkdir tests\output\sandbox).
+    - 결과는 tests\output\sandbox\run\ 에 남는다 (exitcode.txt 기대값 exit_code=1, 성공 5 / 실패 2).
+    - HostFolder는 이 PC의 프로젝트 절대경로다. 프로젝트 폴더를 옮기면 HostFolder 4곳을 고친다.
+      한글·괄호가 든 경로를 Sandbox가 매핑하지 못하면, 프로젝트를 영문 경로(예: C:\stt_verify)에 복사해 고친다.
+  -->
+  <Networking>Disable</Networking>
+  <VGpu>Disable</VGpu>
+  <ClipboardRedirection>Disable</ClipboardRedirection>
+  <MemoryInMB>8192</MemoryInMB>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\Claude(바이브코딩)\Study\STT변환기\dist\STT변환기</HostFolder>
+      <SandboxFolder>C:\app</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\Claude(바이브코딩)\Study\STT변환기\tests\samples</HostFolder>
+      <SandboxFolder>C:\samples</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\Claude(바이브코딩)\Study\STT변환기\verify</HostFolder>
+      <SandboxFolder>C:\verify</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\Claude(바이브코딩)\Study\STT변환기\tests\output\sandbox</HostFolder>
+      <SandboxFolder>C:\work</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>cmd.exe /c C:\verify\run_in_sandbox.cmd</Command>
+  </LogonCommand>
+</Configuration>
