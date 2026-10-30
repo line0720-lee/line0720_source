@@ -25,6 +25,7 @@ _DIST_FILES = [
     "_internal/VCRUNTIME140.dll",
     "_internal/VCRUNTIME140_1.dll",
     "_internal/MSVCP140.dll",
+    "_internal/MSVCP140_1.dll",
     "_internal/ctranslate2/ctranslate2.dll",
     "_internal/ctranslate2/libiomp5md.dll",
     "_internal/onnxruntime/capi/onnxruntime.dll",
@@ -223,6 +224,62 @@ def test_refuses_file_dated_before_1980(tree, capsys):
     assert not list(release.glob("*.part"))  # 임시 파일은 지운다
     assert not (release / "테스트샘플.zip").exists()
     assert not (release / "SHA256SUMS.txt").exists()
+
+
+@pytest.fixture
+def docs(tmp_path):
+    """반입 때 함께 가져갈 문서(README.md, 체크리스트.md)의 시험용 원본."""
+    readme = tmp_path / "src_docs" / "README.md"
+    checklist = tmp_path / "src_docs" / "verify" / "체크리스트.md"
+    _touch(readme, "# 설명서\n해시는 SHA256SUMS.txt\n".encode("utf-8"))
+    _touch(checklist, "# 체크리스트\n- [ ] 1-1\n".encode("utf-8"))
+    return readme, checklist
+
+
+def test_package_copies_docs_outside_zips_and_not_hashed(tree, docs, capsys):
+    dist, models, samples, release = tree
+    made = package_tool.package(dist, models, samples, release, docs=docs)
+    readme, checklist = docs
+    assert (release / "README.md").read_bytes() == readme.read_bytes()
+    assert (release / "체크리스트.md").read_bytes() == checklist.read_bytes()
+    sums_names = [line.split("  ", 1)[1] for line in (release / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines()]
+    assert sums_names == sorted(p.name for p in made)
+    assert all(name.endswith(".zip") for name in sums_names)
+    for zip_path in made:
+        assert not [n for n in _names(zip_path) if n.endswith(".md")]
+    out = capsys.readouterr().out
+    assert "README.md" in out and "체크리스트.md" in out
+
+
+def test_package_replaces_stale_docs(tree, docs):
+    dist, models, samples, release = tree
+    _touch(release / "README.md", "예전 설명서".encode("utf-8"))
+    _touch(release / "체크리스트.md", "예전 체크리스트".encode("utf-8"))
+    package_tool.package(dist, models, samples, release, docs=docs)
+    assert (release / "README.md").read_bytes() == docs[0].read_bytes()
+    assert (release / "체크리스트.md").read_bytes() == docs[1].read_bytes()
+
+
+def test_clean_release_removes_stale_docs(tmp_path):
+    release = tmp_path / "release"
+    for name in ("README.md", "체크리스트.md", "메모.md"):
+        _touch(release / name)
+    package_tool._clean_release(release)
+    assert sorted(p.name for p in release.iterdir()) == ["메모.md"]
+
+
+def test_refuses_without_doc_source(tree, docs, capsys):
+    dist, models, samples, release = tree
+    docs[1].unlink()
+    with pytest.raises(package_tool.PackageError) as exc:
+        package_tool.package(dist, models, samples, release, docs=docs)
+    assert "체크리스트.md" in str(exc.value)
+    assert not (release / "STT변환기_앱.zip").exists()
+
+
+def test_default_docs_are_project_readme_and_checklist():
+    root = Path(package_tool.PROJECT_ROOT)
+    assert tuple(package_tool.DEFAULT_DOCS) == (root / "README.md", root / "verify" / "체크리스트.md")
 
 
 def test_main_success(tree, capsys):

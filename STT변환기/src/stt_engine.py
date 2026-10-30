@@ -80,6 +80,10 @@ class SttEngine:
             model = WhisperModel(path_str, **options)
             self._log_loaded("일반 경로", started)
             return model
+        except MemoryError:
+            # 메모리 부족은 다른 방법으로 다시 시도하지 않는다(files=는 모델 전체를 메모리로 읽어 더 나빠진다).
+            # 그대로 올려 화면에 "small 모델로 바꿔 보세요" 안내가 나오게 한다.
+            raise
         except Exception as exc:  # 비ASCII 경로 등으로 실패할 수 있다
             logger.warning("모델 로딩 실패(일반 경로): %s", exc)
             last_error = exc
@@ -90,6 +94,8 @@ class SttEngine:
                 model = WhisperModel(short, **options)
                 self._log_loaded(f"짧은 경로({short})", started)
                 return model
+            except MemoryError:
+                raise
             except Exception as exc:
                 logger.warning("모델 로딩 실패(짧은 경로 %s): %s", short, exc)
                 last_error = exc
@@ -102,6 +108,8 @@ class SttEngine:
             model = WhisperModel(path_str, files=files, **options)
             self._log_loaded("files= 메모리 로딩", started)
             return model
+        except MemoryError:
+            raise
         except Exception as exc:
             logger.error("모델 로딩 실패(files=): %s", exc)
             last_error = exc

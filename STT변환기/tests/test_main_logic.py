@@ -126,6 +126,23 @@ def test_summary_message_fallback_file():
     assert "열려 있어" in msg
 
 
+def test_summary_message_no_file_processed_says_header_only():
+    """첫 파일 전에 중지하면 결과 파일에는 머리글만 있다는 것을 알린다(버튼은 그대로 둔다)."""
+    msg = summary_message(_summary(total=3, done=0, failed=0, stopped=True))
+    assert "STT_결과_20261028_093015.xlsx" in msg
+    assert "처리한 파일이 없어 결과 파일에는 머리글만 있습니다." in msg
+
+
+def test_summary_message_with_rows_has_no_header_only_line():
+    assert "머리글만" not in summary_message(_summary(total=3, done=1, failed=0, stopped=True))
+    assert "머리글만" not in summary_message(_summary(total=3, done=0, failed=3))
+
+
+def test_summary_message_no_file_and_no_excel_path():
+    msg = summary_message(_summary(total=0, done=0, failed=0, excel_path=None))
+    assert "머리글만" not in msg and "결과 파일" not in msg
+
+
 def test_exit_code():
     assert exit_code(_summary()) == 0
     assert exit_code(_summary(done=2, failed=1)) == 1

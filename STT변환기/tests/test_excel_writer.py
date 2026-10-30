@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from openpyxl import load_workbook
 
+import excel_writer
 from batch_runner import RowWriter, run_batch
 from excel_writer import CELL_LIMIT, OVERFLOW_NOTE, ExcelWriter
 from records import ResultRow
@@ -196,16 +197,125 @@ def test_second_overflow_appends_to_existing_fulltext_sheet(tmp_path):
     ]
 
 
-def _lock_on_original(monkeypatch, writer: ExcelWriter, original: Path, calls: list):
+def test_overflow_txt_equals_fulltext_sheet_when_control_chars(tmp_path):
+    """제어 문자가 섞여도 txt 내용은 '전문' 시트 조각을 이어 붙인 것과 같다(둘 다 제거본)."""
+    text = "가\x01" * (CELL_LIMIT + 10) + "나" * 100  # 제어 문자를 빼도 한도를 넘는다
+    writer = make_writer(tmp_path)
+    writer.add_row(make_row(1, "제어.wav", text))
+    full = load_workbook(writer.path)["전문"]
+    joined = "".join(full.cell(r, 4).value for r in range(2, full.max_row + 1))
+    assert "\x01" not in joined
+    assert (tmp_path / "제어.txt").read_text(encoding="utf-8-sig") == joined
+
+
+def test_overflow_txt_write_failure_still_records_row(tmp_path, caplog):
+    """txt를 쓰지 못해도(경로 너무 김·디스크 부족 등) 일괄 처리를 멈추지 않고 행을 기록한다."""
+    import logging
+
+    warnings: list[str] = []
+    writer = make_writer(tmp_path, warnings.append)
+    writer._free_txt_path = lambda name: tmp_path / "없는 폴더" / "회의.txt"  # 쓰기에서 FileNotFoundError(OSError)
+    text = "가" * (CELL_LIMIT + 10)
+    with caplog.at_level(logging.ERROR, logger="excel_writer"):
+        writer.add_row(make_row(3, "회의.wav", text))
+    writer.add_row(make_row(4, "다음.wav", "다음 파일"))
+
+    wb = load_workbook(writer.path)
+    ws = wb["STT결과"]
+    assert [ws.cell(r, 2).value for r in (2, 3)] == ["회의.wav", "다음.wav"]
+    shown = ws["C2"].value
+    assert len(shown) <= CELL_LIMIT
+    assert shown.endswith(excel_writer.OVERFLOW_NOTE_NO_TXT)
+    assert "txt" in excel_writer.OVERFLOW_NOTE_NO_TXT and "전문" in excel_writer.OVERFLOW_NOTE_NO_TXT
+    full = wb["전문"]
+    assert "".join(full.cell(r, 4).value for r in range(2, full.max_row + 1)) == text  # 시트에는 전체가 있다
+    assert len(warnings) == 1
+    assert "전문 txt 파일을 저장하지 못했습니다" in warnings[0] and "회의.txt" in warnings[0]
+    assert "'전문' 시트에는 저장됨" in warnings[0]
+    assert any(r.exc_info for r in caplog.records)
+    assert list(tmp_path.glob("*.txt")) == []
+
+
+def test_overflow_note_mentions_txt_when_txt_saved(tmp_path):
+    writer = make_writer(tmp_path)
+    writer.add_row(make_row(text="가" * (CELL_LIMIT + 1)))
+    assert open_sheet(writer.path)["C2"].value.endswith(OVERFLOW_NOTE)
+
+
+# --- 원자적 저장(임시 파일 → os.replace) ------------------------------------
+
+
+def test_save_goes_through_tmp_file_then_replace(tmp_path, monkeypatch):
+    writer = make_writer(tmp_path)
+    saved: list[Path] = []
     real_save = writer._wb.save
 
-    def fake_save(target):
+    def spy(target):
+        saved.append(Path(target))
+        real_save(target)
+
+    monkeypatch.setattr(writer._wb, "save", spy)
+    writer.add_row(make_row())
+    assert saved == [tmp_path / "STT_결과_20261028_093015.xlsx.tmp"]
+    assert open_sheet(writer.path).max_row == 2
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+@pytest.mark.parametrize("error", [OSError(28, "No space left on device"), KeyboardInterrupt()])
+def test_failed_save_keeps_previous_file_and_leaves_no_tmp(tmp_path, monkeypatch, error):
+    """저장 도중 실패(디스크 부족·강제 중단)해도 이미 저장된 행은 그대로 남고 임시 파일도 남지 않는다."""
+    writer = make_writer(tmp_path)
+    writer.add_row(make_row(1, "a.wav"))
+
+    def broken_save(target):
+        Path(target).write_bytes(b"PK\x03\x04 truncated")  # 쓰다 만 상태
+        raise error
+
+    monkeypatch.setattr(writer._wb, "save", broken_save)
+    with pytest.raises(type(error)):
+        writer.add_row(make_row(2, "b.wav"))
+
+    ws = open_sheet(writer.path)
+    assert ws.max_row == 2 and ws["B2"].value == "a.wav"
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_locked_target_on_replace_retries_then_falls_back_without_tmp(tmp_path, monkeypatch):
+    """엑셀이 연 파일 위로 os.replace하면 PermissionError → 3회 시도 후 임시저장. 임시 파일은 남지 않는다."""
+    warnings: list[str] = []
+    sleeps: list[float] = []
+    writer = ExcelWriter(tmp_path, STARTED, warnings.append, sleep=sleeps.append)
+    original = writer.path
+    replaced: list[Path] = []
+    real_replace = excel_writer.os.replace
+
+    def locked_replace(src, dst):
+        replaced.append(Path(dst))
+        if Path(dst) == original:
+            raise PermissionError(13, "The process cannot access the file", str(dst))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(excel_writer.os, "replace", locked_replace)
+    writer.add_row(make_row())
+
+    fallback = tmp_path / "STT_결과_20261028_093015_임시저장.xlsx"
+    assert replaced == [original] * 3 + [fallback]
+    assert sleeps == [1, 1]
+    assert writer.path == fallback and len(warnings) == 1
+    assert open_sheet(fallback).max_row == 2
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def _lock_on_original(monkeypatch, writer: ExcelWriter, original: Path, calls: list):
+    real_write = writer._write_file
+
+    def fake_write(target):
         calls.append(Path(target))
         if Path(target) == original:
             raise PermissionError(13, "Permission denied", str(target))
-        real_save(target)
+        real_write(target)
 
-    monkeypatch.setattr(writer._wb, "save", fake_save)
+    monkeypatch.setattr(writer, "_write_file", fake_write)
 
 
 def test_save_falls_back_when_locked(tmp_path, monkeypatch):
@@ -239,16 +349,16 @@ def test_recovers_without_fallback_when_lock_clears_within_retries(tmp_path, mon
     warnings: list[str] = []
     writer = ExcelWriter(tmp_path, STARTED, warnings.append, sleep=no_sleep)
     original = writer.path
-    real_save = writer._wb.save
+    real_write = writer._write_file
     attempts = {"n": 0}
 
-    def flaky_save(target):
+    def flaky_write(target):
         attempts["n"] += 1
         if attempts["n"] < 3:
             raise PermissionError(13, "Permission denied")
-        real_save(target)
+        real_write(target)
 
-    monkeypatch.setattr(writer._wb, "save", flaky_save)
+    monkeypatch.setattr(writer, "_write_file", flaky_write)
     writer.add_row(make_row())
     assert writer.path == original and warnings == []
     assert open_sheet(original).max_row == 2
@@ -260,7 +370,7 @@ def test_fallback_save_failure_propagates(tmp_path, monkeypatch):
     def always_denied(_target):
         raise PermissionError(13, "Permission denied")
 
-    monkeypatch.setattr(writer._wb, "save", always_denied)
+    monkeypatch.setattr(writer, "_write_file", always_denied)
     with pytest.raises(PermissionError):
         writer.add_row(make_row())
 
@@ -274,7 +384,7 @@ def test_non_permission_oserror_propagates_immediately(tmp_path, monkeypatch):
         calls.append(Path(target))
         raise OSError(28, "No space left on device")
 
-    monkeypatch.setattr(writer._wb, "save", disk_full)
+    monkeypatch.setattr(writer, "_write_file", disk_full)
     with pytest.raises(OSError):
         writer.add_row(make_row())
     assert len(calls) == 1 and sleeps == [] and writer.path.name == "STT_결과_20261028_093015.xlsx"
@@ -324,6 +434,7 @@ def test_save_falls_back_with_real_windows_lock(tmp_path):
     assert len(warnings) == 1
     assert open_sheet(fallback).max_row == 2
     assert open_sheet(original).max_row == 1  # 잠겨 있던 원본은 건드리지 못했다
+    assert list(tmp_path.glob("*.tmp")) == []  # os.replace가 거부된 임시 파일도 지웠다
 
 
 @pytest.mark.model

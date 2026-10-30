@@ -1,4 +1,6 @@
 """stt_engine 테스트. 실제 모델이 필요한 것은 @pytest.mark.model (빠른 small 모델 사용)."""
+import logging
+import os
 import socket
 import types
 import wave
@@ -17,10 +19,14 @@ KEYWORDS = ("병리과", "조직검사", "검체", "판독", "화요일", "회�
 # ---------------------------------------------------------------- 실제 모델 테스트
 
 @pytest.mark.model
-def test_engine_loads_from_korean_path(small_engine, small_cfg):
-    # 프로젝트 경로(한글·괄호 포함)에서 그대로 로딩되어야 한다
+def test_engine_loads_from_korean_path(small_cfg, caplog):
+    # 프로젝트 경로(한글·괄호 포함)에서 대체 방법(짧은 경로·files=) 없이 일반 경로로 로딩되어야 한다
     assert any(ord(ch) > 127 for ch in str(small_cfg.model_path))
-    assert small_engine is not None
+    with caplog.at_level(logging.INFO, logger="stt_engine"):
+        engine = SttEngine(small_cfg)
+    assert engine is not None
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("방식=일반 경로" in m for m in messages), messages
 
 
 @pytest.mark.model
@@ -77,6 +83,12 @@ def test_no_network_during_transcribe(monkeypatch, small_cfg, samples_dir):
         raise AssertionError("네트워크 접속 시도가 감지되었다")
 
     monkeypatch.setattr(socket.socket, "connect", _blocked)
+    # 온라인 조회 차단 설정이 faster_whisper(huggingface_hub)보다 먼저 들어가 있어야 한다
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+    import huggingface_hub.constants as hf_constants
+
+    if hasattr(hf_constants, "HF_HUB_OFFLINE"):
+        assert hf_constants.HF_HUB_OFFLINE is True
     engine = SttEngine(small_cfg)  # 로딩부터 변환까지 모두 차단 상태에서 수행
     result = engine.transcribe(samples_dir / "기본_16k.wav")
     assert result.text.strip() != ""
@@ -185,6 +197,42 @@ def test_load_stops_after_first_success(monkeypatch, tmp_path, fake_model_dir):
     monkeypatch.setattr(stt_engine, "WhisperModel", _make_fake_whisper(0, calls))
     SttEngine(_cfg(tmp_path, fake_model_dir))
     assert len(calls) == 1
+
+
+def test_load_memory_error_is_not_retried(monkeypatch, tmp_path, fake_model_dir):
+    """메모리 부족은 다른 방법(짧은 경로·files= 메모리 로딩)으로 다시 시도하지 않고 그대로 올린다."""
+    calls = []
+
+    class OutOfMemoryWhisper:
+        def __init__(self, path, **kwargs):
+            calls.append((path, kwargs))
+            raise MemoryError("bad allocation")
+
+    monkeypatch.setattr(stt_engine, "WhisperModel", OutOfMemoryWhisper)
+    monkeypatch.setattr(stt_engine, "_short_path", lambda p: "SHORT/PATH")
+    with pytest.raises(MemoryError):
+        SttEngine(_cfg(tmp_path, fake_model_dir))
+    assert len(calls) == 1
+    assert "files" not in calls[0][1]
+
+
+@pytest.mark.parametrize("fail_before", [1, 2])
+def test_load_memory_error_in_fallback_is_not_retried(monkeypatch, tmp_path, fake_model_dir, fail_before):
+    """대체 경로 시도 중에 메모리가 부족해도 다음 방법으로 넘어가지 않는다."""
+    calls = []
+
+    class Whisper:
+        def __init__(self, path, **kwargs):
+            calls.append((path, kwargs))
+            if len(calls) <= fail_before:
+                raise RuntimeError("로딩 실패(가짜)")
+            raise MemoryError("bad allocation")
+
+    monkeypatch.setattr(stt_engine, "WhisperModel", Whisper)
+    monkeypatch.setattr(stt_engine, "_short_path", lambda p: "SHORT/PATH")
+    with pytest.raises(MemoryError):
+        SttEngine(_cfg(tmp_path, fake_model_dir))
+    assert len(calls) == fail_before + 1
 
 
 def test_load_all_fail_raises(monkeypatch, tmp_path, fake_model_dir):

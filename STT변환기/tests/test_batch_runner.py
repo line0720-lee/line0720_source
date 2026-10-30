@@ -376,12 +376,23 @@ def test_fallback_sort_key_natural_order():
     """windll이 없는 환경용 대체 정렬 키도 숫자 크기·대소문자 무시로 정렬한다."""
     from batch_runner import _fallback_sort_key
 
-    names = ["회의10.wav", "B.wav", "회의2.wav", "a.wav", "10팀\a.wav", "2팀\a.wav"]
+    names = ["회의10.wav", "B.wav", "회의2.wav", "a.wav", "10팀\\a.wav", "2팀\\a.wav"]
     assert sorted(names, key=_fallback_sort_key) == [
-        "2팀\a.wav",
-        "10팀\a.wav",
+        "2팀\\a.wav",
+        "10팀\\a.wav",
         "a.wav",
         "B.wav",
         "회의2.wav",
         "회의10.wav",
     ]
+
+
+def test_fallback_sort_key_superscript_digit_does_not_crash():
+    """'²'처럼 isdigit()은 참이지만 int()로 바꿀 수 없는 글자가 있어도 정렬이 멈추지 않는다."""
+    from batch_runner import _fallback_sort_key
+
+    # re의 \d는 '²'를 숫자로 보지 않으므로 '1²2'처럼 숫자 사이에 끼면 '²'만 따로 한 조각이 된다
+    for name in ("회의².wav", "회의1²2.wav", "²"):
+        _fallback_sort_key(name)  # 예외 없음
+    names = ["회의10.wav", "회의1²2.wav", "회의2.wav"]
+    assert sorted(names, key=_fallback_sort_key) == ["회의1²2.wav", "회의2.wav", "회의10.wav"]

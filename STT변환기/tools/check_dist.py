@@ -22,11 +22,13 @@ CUDA_MARKERS = ("cublas", "cudnn", "cudart", "cufft", "nvrtc")  # GPU 전용 DLL
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DIST = PROJECT_ROOT / "dist" / APP_NAME
 
+# _internal 바로 아래에 있어야 하는 VC++ 런타임(python311.dll·ctranslate2.dll·onnxruntime.dll이 불러 씀).
+# numpy.libs 등 하위 폴더에 있는 다른 사본은 인정하지 않는다. MSVCP140_1.dll은 onnxruntime.dll이 import한다.
+# 파일 시스템이 대소문자를 구분하지 않으므로 실제 이름(VCRUNTIME140.dll, MSVCP140_1.dll 등)과 같게 찾는다.
+_VC_RUNTIME_DLLS = ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "msvcp140_1.dll")
+
 # _internal 아래 어디에 있든 있어야 하는 파일(항목 이름, 파일명 패턴). 대소문자는 구분하지 않는다.
 _REQUIRED_IN_INTERNAL = [
-    ("vcruntime140.dll", "vcruntime140.dll"),
-    ("vcruntime140_1.dll", "vcruntime140_1.dll"),
-    ("msvcp140.dll", "msvcp140.dll"),
     ("ctranslate2 DLL (ctranslate2.dll)", "ctranslate2.dll"),
     ("ctranslate2 OpenMP DLL (libiomp5md.dll)", "libiomp5md.dll"),
     ("onnxruntime DLL (onnxruntime.dll)", "onnxruntime.dll"),
@@ -89,6 +91,7 @@ def run_checks(dist: Path, model_name: str) -> list[CheckRow]:
         _exists_row("glossary.txt", dist / "glossary.txt", dist),
         _exists_row("_internal\\python311.dll", internal / "python311.dll", dist),
     ]
+    rows += [_exists_row(f"_internal\\{name}", internal / name, dist) for name in _VC_RUNTIME_DLLS]
     rows += [_pattern_row(item, pattern, files, dist) for item, pattern in _REQUIRED_IN_INTERNAL]
 
     vad = sorted((internal / "faster_whisper" / "assets").glob("*.onnx"))

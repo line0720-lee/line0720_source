@@ -267,6 +267,75 @@ def test_cli_save_failure_names_partial_file(tmp_path, monkeypatch, capsys):
     assert "변환 중 오류가 발생했습니다" in out and xlsx.name in out
 
 
+class _FailingSaveFrom(main.ExcelWriter):
+    """index번째 행부터 저장이 거부되는 writer(엑셀 저장 실패로 일괄 처리가 멈추는 경우)."""
+
+    fail_from = 1
+
+    def add_row(self, row):
+        if row.index >= self.fail_from:
+            raise PermissionError("저장 거부(테스트)")
+        super().add_row(row)
+
+
+def test_cli_save_failure_before_any_row_does_not_claim_saved_results(tmp_path, monkeypatch, capsys):
+    folder = _make_folder(tmp_path, "1.wav", "2.wav")
+    _use_fakes(tmp_path, monkeypatch)
+    monkeypatch.setattr(main, "ExcelWriter", type("FailFirst", (_FailingSaveFrom,), {"fail_from": 1}))
+    assert main.main(["--folder", str(folder), "--no-gui"]) == 2  # 저장된 행 없음
+    out = capsys.readouterr().out
+    assert "변환 중 오류가 발생했습니다" in out
+    assert "지금까지의 결과" not in out
+
+
+# --------------------------------------------------------------- 화면 모드 작업 스레드(App._work, 창 없이)
+
+
+def _work_events(tmp_path, monkeypatch, writer_cls, *names) -> list[tuple]:
+    """Tk 창을 만들지 않고 App._work만 실행해 queue에 넣은 이벤트를 돌려준다."""
+    import queue
+    import threading
+
+    folder = _make_folder(tmp_path, *names)
+    monkeypatch.setattr(main, "ExcelWriter", writer_cls)
+    app = object.__new__(main.App)  # __init__(창 생성)은 건너뛴다. _work가 쓰는 속성만 채운다
+    app.events = queue.Queue()
+    app.engine = FakeEngine(None)
+    app.cfg = _fake_config(tmp_path)
+    app.log_dir = None
+    app._work(folder, False, threading.Event())
+    events = []
+    while not app.events.empty():
+        events.append(app.events.get_nowait())
+    return events
+
+
+def test_gui_work_save_failure_after_rows_points_to_partial_file(tmp_path, monkeypatch):
+    events = _work_events(tmp_path, monkeypatch, type("FailSecond", (_FailingSaveFrom,), {"fail_from": 2}),
+                          "1.wav", "2.wav")
+    kinds = [kind for kind, _ in events]
+    assert kinds.count("row") == 1 and kinds[-1] == "finished"
+    paths = [payload for kind, payload in events if kind == "result_path"]
+    assert len(paths) == 1 and paths[0].name.startswith("STT_결과_")
+    error = next(payload for kind, payload in events if kind == "error")
+    assert "지금까지의 결과는 저장되어 있습니다" in error and paths[0].name in error
+
+
+def test_gui_work_save_failure_before_any_row_has_no_partial_claim(tmp_path, monkeypatch):
+    events = _work_events(tmp_path, monkeypatch, type("FailFirst", (_FailingSaveFrom,), {"fail_from": 1}),
+                          "1.wav", "2.wav")
+    kinds = [kind for kind, _ in events]
+    assert "row" not in kinds and "result_path" not in kinds
+    error = next(payload for kind, payload in events if kind == "error")
+    assert "변환 중 오류가 발생했습니다" in error and "지금까지의 결과" not in error
+
+
+def test_gui_work_success_puts_rows_and_summary(tmp_path, monkeypatch):
+    events = _work_events(tmp_path, monkeypatch, main.ExcelWriter, "1.wav", "2.wav")
+    kinds = [kind for kind, _ in events]
+    assert kinds.count("row") == 2 and "summary" in kinds and "error" not in kinds
+
+
 def test_model_override_changes_model_path(tmp_path, monkeypatch):
     base = _fake_config(tmp_path)
     medium = AppConfig("medium", base.model_path.parent / "medium", "ko", 1, base.glossary_path)

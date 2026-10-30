@@ -8,18 +8,22 @@
     모델_{이름}.zip            나머지 모델. 앱 폴더(STT변환기\\) 안에서 풀면 models\\{이름}\\ 이 생긴다
     테스트샘플.zip             tests\\samples (폐쇄망 PC 확인용). 압축 안의 최상위 폴더는 테스트샘플\\
     SHA256SUMS.txt            위 zip들의 SHA-256 (sha256sum 형식: 해시, 공백 2칸, 파일명 / UTF-8)
+    README.md, 체크리스트.md   프로젝트 README.md와 verify\\체크리스트.md의 사본(반입해 읽는 참고 문서).
+                              zip 밖에 그대로 두며 SHA256SUMS.txt에는 넣지 않는다(해시는 승인 대상 zip만)
 
 앱 zip에는 build.bat이 만든 것(STT변환기.exe, _internal\\, config.ini, glossary.txt, models\\{모델}\\)만 넣는다.
 dist 안에서 시험 실행하며 생긴 logs\\, result\\ 같은 폴더는 넣지 않는다. 모델의 .cache(내려받기 기록)도 뺀다.
-종료 코드: 0 = 성공, 1 = 실패(배포 폴더 점검 실패, exe·모델 없음, 압축 실패)
+종료 코드: 0 = 성공, 1 = 실패(배포 폴더 점검 실패, exe·모델·문서 원본 없음, 압축·복사 실패)
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import os
+import shutil
 import sys
 import zipfile
+from collections.abc import Sequence
 from pathlib import Path
 
 _TOOLS_DIR = Path(__file__).resolve().parent
@@ -36,6 +40,9 @@ DEFAULT_DIST = PROJECT_ROOT / "dist" / APP_NAME
 DEFAULT_MODELS = PROJECT_ROOT / "models"
 DEFAULT_SAMPLES = PROJECT_ROOT / "tests" / "samples"
 DEFAULT_RELEASE = PROJECT_ROOT / "release"
+# release\에 사본으로 둘 참고 문서(원본 경로). 사본 이름은 원본 파일 이름 그대로다.
+DEFAULT_DOCS = (PROJECT_ROOT / "README.md", PROJECT_ROOT / "verify" / "체크리스트.md")
+DOC_NAMES = tuple(p.name for p in DEFAULT_DOCS)
 
 APP_ZIP = f"{APP_NAME}_앱.zip"
 SAMPLES_ZIP = "테스트샘플.zip"
@@ -137,12 +144,23 @@ def write_sums(release: Path, zips: list[Path]) -> Path:
     return path
 
 
-def _clean_release(release: Path) -> None:
-    """지난번에 만든 결과물을 지운다(모델을 바꿨을 때 예전 zip이 남지 않게). 다른 파일은 건드리지 않는다."""
+def _clean_release(release: Path, doc_names: Sequence[str] = DOC_NAMES) -> None:
+    """지난번에 만든 결과물(zip·SUMS·문서 사본)을 지운다(모델을 바꿨을 때 예전 zip이 남지 않게).
+    다른 파일은 건드리지 않는다."""
     for path in list(release.glob("*.zip")) + list(release.glob("*.zip.part")) + [release / SUMS_FILE]:
         name = path.name.removesuffix(".part")
         if name in (APP_ZIP, SAMPLES_ZIP, SUMS_FILE) or (name.startswith("모델_") and name.endswith(".zip")):
             path.unlink(missing_ok=True)
+    for name in dict.fromkeys([*DOC_NAMES, *doc_names]):
+        (release / name).unlink(missing_ok=True)
+
+
+def copy_docs(release: Path, docs: Sequence[Path]) -> list[Path]:
+    """참고 문서를 release\\에 같은 이름으로 복사한다. zip에도 SHA256SUMS.txt에도 넣지 않는다."""
+    copied = []
+    for source in docs:
+        copied.append(Path(shutil.copy2(source, Path(release) / Path(source).name)))
+    return copied
 
 
 # ------------------------------------------------------------------ 전체 흐름
@@ -173,10 +191,24 @@ def _size(path: Path) -> str:
     return f"{size / 1024 ** 3:.2f}GB" if size >= 1024 ** 3 else f"{size / 1024 ** 2:.1f}MB"
 
 
-def package(dist: Path, models_dir: Path, samples: Path, release: Path, run_check: bool = True) -> list[Path]:
-    """release 폴더에 zip과 SHA256SUMS.txt를 만들고 만든 zip 목록을 돌려준다. 실패하면 PackageError."""
+def package(
+    dist: Path,
+    models_dir: Path,
+    samples: Path,
+    release: Path,
+    run_check: bool = True,
+    docs: Sequence[Path] = DEFAULT_DOCS,
+) -> list[Path]:
+    """release 폴더에 zip과 SHA256SUMS.txt를 만들고 문서 사본(docs)을 둔 뒤 만든 zip 목록을 돌려준다.
+
+    실패하면 PackageError. docs는 zip 밖에 복사만 하고 SHA256SUMS.txt에는 넣지 않는다.
+    """
     dist, models_dir, samples, release = Path(dist), Path(models_dir), Path(samples), Path(release)
+    docs = [Path(d) for d in docs]
     model, others = _check_inputs(dist, models_dir)
+    missing_docs = [d for d in docs if not d.is_file()]
+    if missing_docs:
+        raise PackageError("함께 둘 문서 파일이 없습니다: " + ", ".join(str(d) for d in missing_docs))
 
     if run_check:
         rows = check_dist.run_checks(dist, model)
@@ -187,7 +219,7 @@ def package(dist: Path, models_dir: Path, samples: Path, release: Path, run_chec
         print(f"배포 폴더 점검: 모두 OK ({len(rows)}항목)")
 
     release.mkdir(parents=True, exist_ok=True)
-    _clean_release(release)
+    _clean_release(release, [d.name for d in docs])
 
     entries, skipped = app_entries(dist, model)
     if skipped:
@@ -215,6 +247,13 @@ def package(dist: Path, models_dir: Path, samples: Path, release: Path, run_chec
     sums = write_sums(release, made)
     print(f"\n{sums.name}:")
     print(sums.read_text(encoding="utf-8"), end="")
+
+    try:
+        copied = copy_docs(release, docs)
+    except OSError as exc:
+        raise PackageError(f"문서 사본을 만들지 못했습니다: {exc}") from exc
+    if copied:
+        print("\n참고 문서 사본(zip 밖, SHA256SUMS.txt에는 넣지 않음): " + ", ".join(p.name for p in copied))
     return made
 
 
@@ -234,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
     except PackageError as exc:
         print(f"오류: {exc}")
         return 1
-    print(f"\n압축 완료: {args.release} ({len(made)}개 zip + {SUMS_FILE})")
+    print(f"\n압축 완료: {args.release} ({len(made)}개 zip + {SUMS_FILE} + 문서 사본 {', '.join(DOC_NAMES)})")
     return 0
 
 

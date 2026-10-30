@@ -83,8 +83,11 @@ def _explorer_sort_key() -> Callable[[str], object]:
 
 
 def _fallback_sort_key(name: str) -> list:
-    """숫자 덩어리는 정수로, 나머지는 소문자로 나누어 비교하는 대체 정렬 키(숫자 < 문자 순)."""
-    return [(0, int(part), "") if part.isdigit() else (1, 0, part.lower()) for part in re.split(r"(\d+)", name) if part]
+    """숫자 덩어리는 정수로, 나머지는 소문자로 나누어 비교하는 대체 정렬 키(숫자 < 문자 순).
+
+    isdigit()은 '²' 같은 위첨자도 참이라 int()에서 오류가 나므로 isdecimal()로 확인한다.
+    """
+    return [(0, int(part), "") if part.isdecimal() else (1, 0, part.lower()) for part in re.split(r"(\d+)", name) if part]
 
 
 def find_wavs(folder: Path, include_subfolders: bool) -> list[Path]:

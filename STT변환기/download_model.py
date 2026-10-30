@@ -29,7 +29,7 @@ def folder_size_gb(folder: Path) -> float:
 
 
 def download(name: str) -> bool:
-    """모델 1개를 models\{name}\ 에 내려받고 성공 여부를 돌려준다."""
+    r"""모델 1개를 models\{name}\ 에 내려받고 성공 여부를 돌려준다."""
     from huggingface_hub import snapshot_download
 
     repo_id = MODEL_REPOS[name]

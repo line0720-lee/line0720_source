@@ -39,16 +39,67 @@ def _fake_kernel32(monkeypatch, attach):
     return calls
 
 
+def _fake_open(monkeypatch, fail_on: int | None = None):
+    """CONOUT$ 열기를 가짜로. fail_on번째(1부터) 열기에서 OSError. 연 스트림 목록을 돌려준다."""
+    opened = []
+
+    def fake_open(name, mode, **kwargs):
+        if fail_on is not None and len(opened) + 1 == fail_on:
+            raise OSError("CONOUT$ 열기 실패")
+        stream = io.StringIO()
+        opened.append((name, mode, kwargs, stream))
+        return stream
+
+    monkeypatch.setattr(main, "open", fake_open, raising=False)
+    return opened
+
+
 def test_attach_skipped_when_console_exists(monkeypatch):
-    """python으로 실행했거나 출력을 리디렉션해 stdout이 원래 있으면 붙지 않는다."""
-    monkeypatch.setattr(main, "_STD_STREAMS_MISSING", False)
+    """python으로 실행했거나 출력을 리디렉션해 stdout·stderr가 원래 있으면 붙지 않는다."""
+    monkeypatch.setattr(main, "_MISSING_STD_STREAMS", ())
     calls = _fake_kernel32(monkeypatch, lambda pid: 1)
     assert main._attach_parent_console() is False
     assert calls == []
 
 
+def test_prepare_records_only_missing_stream_names(monkeypatch):
+    """`STT변환기.exe … --no-gui > out.txt`처럼 stdout만 있으면 stderr만 없는 것으로 기록한다."""
+    monkeypatch.setattr(main, "_MISSING_STD_STREAMS", main._MISSING_STD_STREAMS)  # 끝나면 되돌린다
+    redirected = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", redirected)
+    monkeypatch.setattr(sys, "stderr", None)
+    main._prepare_std_streams()
+    try:
+        assert main._MISSING_STD_STREAMS == ("stderr",)
+        assert sys.stdout is redirected
+        assert sys.stderr is not None
+    finally:
+        sys.stderr.close()  # 빈 장치(devnull)
+
+
+def test_attach_replaces_only_missing_stderr(monkeypatch):
+    """출력 리디렉션(stdout)은 그대로 두고 없던 stderr만 CONOUT$로 연다."""
+    monkeypatch.setattr(main, "_MISSING_STD_STREAMS", ("stderr",))
+    _fake_kernel32(monkeypatch, lambda pid: 1)
+    opened = _fake_open(monkeypatch)
+    redirected = sys.stdout
+    assert main._attach_parent_console() is True
+    assert [o[0] for o in opened] == ["CONOUT$"]
+    assert sys.stdout is redirected
+    assert sys.stderr is opened[0][3]
+
+
+def test_attach_replaces_only_missing_stdout(monkeypatch):
+    monkeypatch.setattr(main, "_MISSING_STD_STREAMS", ("stdout",))
+    _fake_kernel32(monkeypatch, lambda pid: 1)
+    opened = _fake_open(monkeypatch)
+    redirected = sys.stderr
+    assert main._attach_parent_console() is True
+    assert sys.stdout is opened[0][3] and sys.stderr is redirected
+
+
 def test_attach_failure_is_silent(monkeypatch):
-    monkeypatch.setattr(main, "_STD_STREAMS_MISSING", True)
+    monkeypatch.setattr(main, "_MISSING_STD_STREAMS", ("stdout", "stderr"))
     calls = _fake_kernel32(monkeypatch, lambda pid: 0)  # 부모 콘솔 없음(탐색기에서 실행 등)
     before = (sys.stdout, sys.stderr)
     assert main._attach_parent_console() is False
@@ -58,7 +109,7 @@ def test_attach_failure_is_silent(monkeypatch):
 
 @pytest.mark.parametrize("error", [OSError("거부"), AttributeError("windll 없음")])
 def test_attach_exception_is_silent(monkeypatch, error):
-    monkeypatch.setattr(main, "_STD_STREAMS_MISSING", True)
+    monkeypatch.setattr(main, "_MISSING_STD_STREAMS", ("stdout", "stderr"))
 
     def boom(pid):
         raise error
@@ -69,33 +120,34 @@ def test_attach_exception_is_silent(monkeypatch, error):
     assert (sys.stdout, sys.stderr) == before
 
 
-def test_attach_success_reopens_streams_on_conout(monkeypatch):
-    monkeypatch.setattr(main, "_STD_STREAMS_MISSING", True)
+def test_attach_success_reopens_both_streams_on_conout(monkeypatch):
+    monkeypatch.setattr(main, "_MISSING_STD_STREAMS", ("stdout", "stderr"))
     _fake_kernel32(monkeypatch, lambda pid: 1)
-    opened = []
-
-    def fake_open(name, mode, **kwargs):
-        opened.append((name, mode, kwargs))
-        return io.StringIO()
-
-    monkeypatch.setattr(main, "open", fake_open, raising=False)
+    opened = _fake_open(monkeypatch)
     assert main._attach_parent_console() is True
     assert [o[0] for o in opened] == ["CONOUT$", "CONOUT$"]
     assert all(o[2].get("encoding") == "utf-8" and o[2].get("buffering") == 1 for o in opened)
-    assert sys.stdout is not sys.stderr and isinstance(sys.stdout, io.StringIO)
+    assert sys.stdout is opened[0][3] and sys.stderr is opened[1][3]
+    assert sys.stdout is not sys.stderr
 
 
 def test_conout_open_failure_keeps_streams(monkeypatch):
-    monkeypatch.setattr(main, "_STD_STREAMS_MISSING", True)
+    monkeypatch.setattr(main, "_MISSING_STD_STREAMS", ("stdout", "stderr"))
     _fake_kernel32(monkeypatch, lambda pid: 1)
-
-    def fake_open(name, mode, **kwargs):
-        raise OSError("CONOUT$ 열기 실패")
-
-    monkeypatch.setattr(main, "open", fake_open, raising=False)
+    _fake_open(monkeypatch, fail_on=1)
     before = (sys.stdout, sys.stderr)
     assert main._attach_parent_console() is False
     assert (sys.stdout, sys.stderr) == before
+
+
+def test_conout_second_open_failure_closes_first_and_keeps_streams(monkeypatch):
+    monkeypatch.setattr(main, "_MISSING_STD_STREAMS", ("stdout", "stderr"))
+    _fake_kernel32(monkeypatch, lambda pid: 1)
+    opened = _fake_open(monkeypatch, fail_on=2)
+    before = (sys.stdout, sys.stderr)
+    assert main._attach_parent_console() is False
+    assert (sys.stdout, sys.stderr) == before
+    assert len(opened) == 1 and opened[0][3].closed  # 먼저 연 것은 닫았다
 
 
 @pytest.mark.parametrize("argv", [[], ["--folder", "C:\\없는 폴더"], ["--subfolders"]])

@@ -14,17 +14,22 @@ import sys
 os.environ["HF_HUB_OFFLINE"] = "1"
 
 
-_STD_STREAMS_MISSING = False  # 시작할 때 stdout/stderr가 없었는지(콘솔 없는 exe·pythonw)
+_MISSING_STD_STREAMS: tuple[str, ...] = ()  # 시작할 때 없던 표준 스트림 이름("stdout"/"stderr", 콘솔 없는 exe·pythonw)
 _ATTACH_PARENT_PROCESS = -1  # AttachConsole: 이 프로그램을 실행한 부모 프로세스의 콘솔
 
 
 def _prepare_std_streams() -> None:
-    """콘솔 없는 exe(console=False)는 stdout/stderr가 None이라 print·로그 출력에서 죽으므로 빈 장치로 돌린다."""
-    global _STD_STREAMS_MISSING
+    """콘솔 없는 exe(console=False)는 stdout/stderr가 None이라 print·로그 출력에서 죽으므로 빈 장치로 돌린다.
+
+    없던 스트림 이름만 기록한다. `STT변환기.exe … > out.txt`처럼 stdout만 리디렉션되어 있으면 stderr만 없다.
+    """
+    global _MISSING_STD_STREAMS
+    missing = []
     for name in ("stdout", "stderr"):
         if getattr(sys, name) is None:
-            _STD_STREAMS_MISSING = True
+            missing.append(name)
             setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115 - 프로그램 끝까지 연다
+    _MISSING_STD_STREAMS = tuple(missing)
     encoding = (getattr(sys.stdout, "encoding", "") or "").lower().replace("-", "")
     if encoding != "utf8":
         try:
@@ -39,23 +44,24 @@ _prepare_std_streams()
 def _attach_parent_console() -> bool:
     """명령줄(--no-gui) 모드 전용: 콘솔 없는 exe를 cmd/PowerShell에서 실행했을 때 그 창에 진행 문구가 보이게 한다.
 
-    부모 콘솔에 붙어(AttachConsole) stdout/stderr를 CONOUT$로 다시 연다. 원래 출력이 있었거나(python 실행·
-    출력 리디렉션) 붙지 못하면(탐색기에서 실행 등) 아무것도 하지 않는다(빈 장치 유지). 화면 모드에서는 부르지 않는다.
+    부모 콘솔에 붙어(AttachConsole) 시작할 때 없던 스트림만 CONOUT$로 다시 연다. 원래 있던 스트림(python 실행·
+    출력 리디렉션 `> out.txt`)은 그대로 둔다. 없던 스트림이 없거나 붙지 못하면(탐색기에서 실행 등) 아무것도 하지
+    않는다(빈 장치 유지). 여는 도중 실패하면 이미 연 것을 닫고 스트림을 바꾸지 않는다. 화면 모드에서는 부르지 않는다.
     """
-    if not _STD_STREAMS_MISSING:
+    if not _MISSING_STD_STREAMS:
         return False
+    opened: dict[str, object] = {}
     try:
         if not ctypes.windll.kernel32.AttachConsole(_ATTACH_PARENT_PROCESS):
             return False
-        out = open("CONOUT$", "w", encoding="utf-8", errors="replace", buffering=1)  # noqa: SIM115
-        try:
-            err = open("CONOUT$", "w", encoding="utf-8", errors="replace", buffering=1)  # noqa: SIM115
-        except (OSError, ValueError):
-            out.close()
-            raise
+        for name in _MISSING_STD_STREAMS:
+            opened[name] = open("CONOUT$", "w", encoding="utf-8", errors="replace", buffering=1)  # noqa: SIM115
     except (AttributeError, OSError, ValueError):
+        for stream in opened.values():
+            stream.close()
         return False
-    sys.stdout, sys.stderr = out, err
+    for name, stream in opened.items():
+        setattr(sys, name, stream)
     return True
 
 
@@ -148,6 +154,8 @@ def summary_message(summary: BatchSummary) -> str:
     if summary.excel_path is not None:
         lines.append("")
         lines.append(f"결과 파일: {Path(summary.excel_path).name}")
+        if summary.done + summary.failed == 0:  # 첫 파일을 끝내기 전에 중지함
+            lines.append("처리한 파일이 없어 결과 파일에는 머리글만 있습니다.")
         if is_fallback_file(summary.excel_path):
             lines.append("원래 결과 파일이 열려 있어 위 이름으로 바꿔 저장했습니다.")
     if summary.memory_error:
@@ -305,7 +313,7 @@ def _run_cli(folder: Path, include_subfolders: bool, model_override: str | None,
         logger.exception("명령줄 변환 중 오류")
         message = MEMORY_ERROR_MESSAGE if isinstance(exc, MemoryError) else f"변환 중 오류가 발생했습니다: {exc}"
         partial = state.partial_path()
-        if partial is not None:
+        if state.rows > 0 and partial is not None:  # 머리글만 있는 파일을 "결과가 저장됨"이라 하지 않는다
             message += f"\n지금까지의 결과({state.rows}건)는 저장되어 있습니다: {partial}"
         _echo(f"오류: {message}")
         return EXIT_FAILED if state.rows else EXIT_CANNOT_START
@@ -721,6 +729,10 @@ class App:
             def make_writer(result_dir: Path, started_at):
                 return ExcelWriter(result_dir, started_at, on_warning=lambda msg: put(("warning", msg)))
 
+            def on_row(row: ResultRow) -> None:
+                state.rows += 1  # 오류로 멈췄을 때 "지금까지의 결과 저장" 안내를 할지 판단한다
+                put(("row", row))
+
             summary = run_batch(
                 folder,
                 include_subfolders,
@@ -728,7 +740,7 @@ class App:
                 state.wrap_factory(make_writer),
                 on_progress=lambda p: put(("progress", p)),
                 stop_event=stop_event,
-                on_row=lambda row: put(("row", row)),
+                on_row=on_row,
             )
             put(("summary", summary))
         except (NoWavFilesError, OutputNotWritableError) as exc:
@@ -741,7 +753,7 @@ class App:
             else:
                 message = f"변환 중 오류가 발생했습니다: {exc}"
             partial = state.partial_path()  # 중간에 멈춰도 그때까지 저장된 엑셀은 열 수 있게 한다
-            if partial is not None:
+            if state.rows > 0 and partial is not None:  # 머리글만 있는 파일은 가리키지 않는다
                 put(("result_path", partial))
                 message += f"\n\n지금까지의 결과는 저장되어 있습니다: {partial.name}"
             if self.log_dir and not isinstance(exc, MemoryError):

@@ -21,6 +21,7 @@ _GOOD_FILES = [
     "_internal/VCRUNTIME140.dll",
     "_internal/VCRUNTIME140_1.dll",
     "_internal/MSVCP140.dll",
+    "_internal/MSVCP140_1.dll",
     "_internal/ctranslate2/ctranslate2.dll",
     "_internal/ctranslate2/libiomp5md.dll",
     "_internal/onnxruntime/capi/onnxruntime.dll",
@@ -51,7 +52,7 @@ def test_good_dist_all_ok(tmp_path):
     assert _failed(rows) == []
     items = " ".join(row.item for row in rows)
     for name in ("STT변환기.exe", "python311.dll", "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll",
-                 "ctranslate2.dll", "onnxruntime.dll", "avcodec", "assets", "cublas", "cudnn", "cudart",
+                 "msvcp140_1.dll", "ctranslate2.dll", "onnxruntime.dll", "avcodec", "assets", "cublas", "cudnn", "cudart",
                  "cufft", "nvrtc", "model.bin", ".cache"):
         assert name in items, f"{name} 확인 항목이 없습니다"
 
@@ -84,6 +85,36 @@ def test_missing_required_file_fails(tmp_path, removed, expected):
     files = [f for f in _GOOD_FILES if not f.endswith(removed)]
     rows = check_dist.run_checks(_make_dist(tmp_path, files), "medium")
     assert any(expected in item for item in _failed(rows))
+
+
+_VC_RUNTIME = ["VCRUNTIME140.dll", "VCRUNTIME140_1.dll", "MSVCP140.dll", "MSVCP140_1.dll"]
+
+
+@pytest.mark.parametrize("dll", _VC_RUNTIME)
+def test_missing_vc_runtime_fails(tmp_path, dll):
+    files = [f for f in _GOOD_FILES if f != f"_internal/{dll}"]
+    assert len(files) == len(_GOOD_FILES) - 1
+    rows = check_dist.run_checks(_make_dist(tmp_path, files), "medium")
+    assert _failed(rows) == [f"_internal\\{dll.lower()}"]
+
+
+@pytest.mark.parametrize("dll", _VC_RUNTIME)
+def test_vc_runtime_only_in_subfolder_fails(tmp_path, dll):
+    """numpy.libs 같은 하위 폴더에만 있으면 실행파일이 찾지 못하므로 실패로 본다(_internal 바로 아래여야 함)."""
+    files = [f for f in _GOOD_FILES if f != f"_internal/{dll}"] + [f"_internal/numpy.libs/{dll}"]
+    rows = check_dist.run_checks(_make_dist(tmp_path, files), "medium")
+    assert _failed(rows) == [f"_internal\\{dll.lower()}"]
+
+
+def test_row_count_is_23(tmp_path):
+    assert len(check_dist.run_checks(_make_dist(tmp_path), "medium")) == 23
+
+
+def test_valid_models_match_app_config():
+    """tools\\check_dist.py는 src를 import하지 않으므로 모델 목록이 src\\config.py와 같은지 여기서 확인한다."""
+    import config
+
+    assert check_dist.VALID_MODELS == config.VALID_MODELS
 
 
 def test_dll_name_match_ignores_case(tmp_path):
